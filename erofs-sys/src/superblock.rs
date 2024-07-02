@@ -1,22 +1,17 @@
 use core::mem::transmute;
 
 use crate::compression::CompressionInfo;
+use crate::inode::Inode;
+use crate::{Blk, Offset};
 
-pub const EROFS_ISLOTBITS: u8 = 5;
+pub const ISLOTBITS: u8 = 5;
+pub const SB_MAGIC: u32 = 0xE0F5E1E2;
 
-#[allow(non_camel_case_types)]
-pub type erofs_blk_t = u32;
-
-#[allow(non_camel_case_types)]
-pub type erofs_off_t = u64;
-
-#[allow(non_camel_case_types)]
-pub type erofs_nid_t = u64;
 
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]
 pub struct SuperBlock {
-    pub magic: i32,
+    pub magic: u32,
     pub checksum: i32,
     pub feature_compat: i32,
     pub blkszbits: u8,
@@ -75,7 +70,7 @@ impl From<SuperBlock> for SuperBlockInfo {
         Self {
             sb: value,
             c_info: CompressionInfo::default(),
-            islotbits: EROFS_ISLOTBITS,
+            islotbits: ISLOTBITS,
         }
     }
 }
@@ -86,11 +81,45 @@ impl From<SuperBlockInfo> for SuperBlock {
     }
 }
 
+impl SuperBlockInfo {
+    pub fn blknr(&self, pos: Offset) -> Blk {
+        (pos >> self.sb.blkszbits) as Blk
+    }
+    pub fn blkpos(&self, blk: Blk) -> Offset {
+        (blk as Offset) << self.sb.blkszbits
+    }
+    pub fn iloc(&self, inode: &Inode) -> Offset {
+        let sb: &SuperBlock = &self.sb;
+        self.blkpos(sb.meta_blkaddr as u32) + ((inode.nid as Offset) << (sb.meta_blkaddr as Offset))
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
+    use std::fs::File;
+    use std::os::unix::fs::FileExt;
+    use std::path::Path;
+
+    fn load_fixture() -> File {
+        let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/sample.img"));
+        let file = File::open(path);
+        assert!(file.is_ok());
+        file.unwrap()
+    }
+
     #[test]
     fn test_superblock_size() {
         assert_eq!(core::mem::size_of::<SuperBlock>(), 128);
+    }
+
+    #[test]
+    fn test_superblock_def() {
+        let img = load_fixture();
+        let mut buf: [u8; 128] = [0; 128];
+        img.read_exact_at(&mut buf, 1024).unwrap();
+        let superblock = SuperBlock::from(buf);
+        assert_eq!(superblock.magic, SB_MAGIC);
     }
 }
