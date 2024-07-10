@@ -1,47 +1,47 @@
-use core::mem::transmute;
-
-use crate::compression::CompressionInfo;
-use crate::inode::Inode;
-use crate::{Blk, Offset};
+use crate::compression::SuperblockCompressionInfo;
+use crate::data::Backend;
+use crate::{Blk, Off};
 
 pub const ISLOTBITS: u8 = 5;
 pub const SB_MAGIC: u32 = 0xE0F5E1E2;
 
-
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]
 pub struct SuperBlock {
-    pub magic: u32,
-    pub checksum: i32,
-    pub feature_compat: i32,
-    pub blkszbits: u8,
-    pub sb_extslots: u8,
-    pub root_nid: i16,
-    pub inos: i64,
-    pub build_time: i64,
-    pub build_time_nsec: i32,
-    pub blocks: i32,
-    pub meta_blkaddr: i32,
-    pub uuid: [u8; 16],
-    pub volume_name: [u8; 16],
-    pub feature_incompat: i32,
-    pub compression: i32,
-    pub extra_devices: i16,
-    pub devt_slotoff: i16,
-    pub dirblkbits: u8,
-    pub xattr_prefix_count: u8,
-    pub xattr_prefix_start: i32,
-    pub packed_nid: i64,
-    pub xattr_filter_reserved: u8,
-    pub reserved: [u8; 23],
+    pub(crate) magic: u32,
+    pub(crate) checksum: i32,
+    pub(crate) feature_compat: i32,
+    pub(crate) blkszbits: u8,
+    pub(crate) sb_extslots: u8,
+    pub(crate) root_nid: i16,
+    pub(crate) inos: i64,
+    pub(crate) build_time: i64,
+    pub(crate) build_time_nsec: i32,
+    pub(crate) blocks: i32,
+    pub(crate) meta_blkaddr: i32,
+    pub(crate) uuid: [u8; 16],
+    pub(crate) volume_name: [u8; 16],
+    pub(crate) feature_incompat: i32,
+    pub(crate) compression: i32,
+    pub(crate) extra_devices: i16,
+    pub(crate) devt_slotoff: i16,
+    pub(crate) dirblkbits: u8,
+    pub(crate) xattr_prefix_count: u8,
+    pub(crate) xattr_prefix_start: i32,
+    pub(crate) packed_nid: i64,
+    pub(crate) xattr_filter_reserved: u8,
+    pub(crate) reserved: [u8; 23],
 }
 
 #[derive(Debug, Clone, Copy)]
-#[repr(C)]
-pub struct SuperBlockInfo {
-    pub sb: SuperBlock,
-    pub c_info: CompressionInfo,
-    pub islotbits: u8,
+pub(crate) struct SuperBlockInfo<T>
+where
+    T: Backend,
+{
+    pub(crate) sb: SuperBlock,
+    pub(crate) c_info: SuperblockCompressionInfo,
+    pub(crate) islotbits: u8,
+    pub(crate) backend: T,
 }
 
 // SAFETY: SuperBlock uses all ffi-safe types.
@@ -61,36 +61,51 @@ impl From<[u8; 128]> for SuperBlock {
 // SAFETY: SuperBlock uses all ffi-safe types.
 impl From<SuperBlock> for [u8; 128] {
     fn from(value: SuperBlock) -> Self {
-        unsafe { transmute(value) }
+        unsafe { core::mem::transmute(value) }
     }
 }
 
-impl From<SuperBlock> for SuperBlockInfo {
-    fn from(value: SuperBlock) -> Self {
+impl<T> SuperBlockInfo<T>
+where
+    T: Backend,
+{
+    pub(crate) fn new(sb: SuperBlock, backend: T) -> Self {
         Self {
-            sb: value,
-            c_info: CompressionInfo::default(),
+            sb,
+            c_info: SuperblockCompressionInfo::default(),
             islotbits: ISLOTBITS,
+            backend,
         }
     }
 }
 
-impl From<SuperBlockInfo> for SuperBlock {
-    fn from(value: SuperBlockInfo) -> Self {
+impl<T> From<SuperBlockInfo<T>> for SuperBlock
+where
+    T: Backend,
+{
+    fn from(value: SuperBlockInfo<T>) -> Self {
         value.sb
     }
 }
 
-impl SuperBlockInfo {
-    pub fn blknr(&self, pos: Offset) -> Blk {
+impl<T> SuperBlockInfo<T>
+where
+    T: Backend,
+{
+    pub(crate) fn blknr(&self, pos: Off) -> Blk {
         (pos >> self.sb.blkszbits) as Blk
     }
-    pub fn blkpos(&self, blk: Blk) -> Offset {
-        (blk as Offset) << self.sb.blkszbits
+    pub(crate) fn blkpos(&self, blk: Blk) -> Off {
+        (blk as Off) << self.sb.blkszbits
     }
-    pub fn iloc(&self, inode: &Inode) -> Offset {
-        let sb: &SuperBlock = &self.sb;
-        self.blkpos(sb.meta_blkaddr as u32) + ((inode.nid as Offset) << (sb.meta_blkaddr as Offset))
+    pub(crate) fn blkoff(&self, offset: Off) -> Off {
+        offset & (self.blksz() - 1)
+    }
+    pub(crate) fn blksz(&self) -> Off {
+        1 << self.sb.blkszbits
+    }
+    pub(crate) fn blk_round_up(&self, addr: Off) -> Blk {
+        ((addr + self.blksz() - 1) >> self.sb.blkszbits) as Blk
     }
 }
 
