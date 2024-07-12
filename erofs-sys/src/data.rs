@@ -9,21 +9,21 @@ use crate::superblock::SuperBlockInfo;
 use crate::*;
 
 #[derive(Debug)]
-pub enum SourceError {
+pub(crate) enum SourceError {
     Dummy,
 }
 
 #[derive(Debug)]
-pub enum BackendError {
+pub(crate) enum BackendError {
     Dummy,
 }
 
-type SourceResult<T> = Result<T, SourceError>;
-type BackendResult<T> = Result<T, BackendError>;
+pub(crate) type SourceResult<T> = Result<T, SourceError>;
+pub(crate) type BackendResult<T> = Result<T, BackendError>;
 
 pub(crate) trait Source {
-    fn fill(&self, data: &mut [u8], offset: Off, len: Off) -> SourceResult<Off>;
-    fn get_block(&self, offset: Off, len: Off) -> SourceResult<Block>;
+    fn fill(&self, data: &mut [u8], offset: Off) -> SourceResult<()>;
+    fn get_block(&self, offset: Off) -> SourceResult<Block>;
 }
 
 pub(crate) trait FileSource: Source {}
@@ -33,7 +33,7 @@ pub(crate) trait MemorySource<'a>: Source {
 }
 
 pub(crate) trait Backend {
-    fn fill(&self, data: &mut [u8], offset: Off, len: Off) -> BackendResult<Off>;
+    fn fill(&self, data: &mut [u8], offset: Off) -> BackendResult<()>;
     fn get_block(&self, offset: Off) -> BackendResult<Block>;
 }
 
@@ -140,7 +140,7 @@ where
         for block in self {
             for dirent in DirCollection::new(&block) {
                 let dirname = dirent.dirname(&block);
-                if dirname.start == name.as_bytes() {
+                if dirname == name.as_bytes() {
                     return Some(dirent.desc.nid as u64);
                 }
             }
@@ -188,7 +188,7 @@ where
         for block in self {
             for dirent in DirCollection::new(block) {
                 let dirname = dirent.dirname(block);
-                if dirname.start == name.as_bytes() {
+                if dirname == name.as_bytes() {
                     return Some(dirent.desc.nid as u64);
                 }
             }

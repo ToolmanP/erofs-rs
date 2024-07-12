@@ -25,11 +25,6 @@ pub(crate) struct DirCollection<'a> {
     total: usize,
 }
 
-pub(crate) struct Dirname<'a> {
-    pub start: &'a [u8],
-    pub len: usize,
-}
-
 impl<'a> DirCollection<'a> {
     pub(crate) fn new(block: &'a Block) -> Self {
         let desc: &'a DirentDesc = unsafe { &*(block.as_ptr() as *const DirentDesc) };
@@ -73,12 +68,9 @@ impl<'a> Iterator for DirCollection<'a> {
     }
 }
 
-impl<'a>  Dirent<'a> {
-    pub(crate) fn dirname(&self, block: &'a Block) -> Dirname<'a> {
+impl<'a> Dirent<'a> {
+    pub(crate) fn dirname(&self, block: &'a Block) -> &'a [u8] {
         let nameoff = self.desc.nameoff as usize;
-        Dirname {
-            start: &block[nameoff..nameoff + self.len],
-            len: self.len,
-        }
+        &block[nameoff..nameoff + self.len]
     }
 }

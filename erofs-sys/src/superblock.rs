@@ -2,6 +2,7 @@ use crate::data::*;
 use crate::inode::*;
 use crate::map::*;
 use crate::*;
+use core::mem::size_of;
 
 pub mod file;
 pub mod mem;
@@ -57,6 +58,9 @@ impl From<SuperBlock> for [u8; 128] {
     }
 }
 
+pub(crate) type SuperBlockBuf = [u8; size_of::<SuperBlock>()];
+pub(crate) const SUPERBLOCK_EMPTY_BUF: SuperBlockBuf = [0; size_of::<SuperBlock>()];
+
 pub(crate) trait SuperBlockInfo<'a, T>
 where
     T: Backend,
@@ -91,9 +95,7 @@ where
     fn read_inode(&self, nid: Nid) -> Inode {
         let offset = self.iloc(nid);
         let mut buf: InodeBuf = DEFAULT_INODE_BUF;
-        self.backend()
-            .fill(&mut buf, offset, core::mem::size_of::<InodeBuf>() as u64)
-            .unwrap();
+        self.backend().fill(&mut buf, offset).unwrap();
         Inode {
             inner: GenericInode::try_from(buf).unwrap(),
             nid,
@@ -171,7 +173,7 @@ mod tests {
     use std::os::unix::fs::FileExt;
     use std::path::Path;
 
-    fn load_fixture() -> File {
+    pub(crate) fn load_fixture() -> File {
         let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/sample.img"));
         let file = File::open(path);
         assert!(file.is_ok());
