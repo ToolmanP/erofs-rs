@@ -1,5 +1,9 @@
 pub mod uncompressed;
-use crate::inode::{Inode, Layout, Spec};
+
+use core::marker::PhantomData;
+
+use crate::dir::*;
+use crate::inode::*;
 use crate::map::*;
 use crate::superblock::SuperBlockInfo;
 use crate::*;
@@ -70,117 +74,38 @@ impl<'a> Buffer<'a> for [u8] {
     }
 }
 
-impl<'a, 'b, T> SuperBlockInfo<T>
+pub(crate) struct MapIter<'a, 'b, T, U>
 where
-    T: Backend,
-    'a: 'b,
+    T: SuperBlockInfo<'a, U>,
+    U: Backend,
 {
-    fn flatmap(&self, inode: &Inode, offset: Off) -> Map {
-        let layout = inode.inner.format().layout();
-        let nblocks = self.blk_round_up(inode.inner.size());
-
-        let blkaddr = match inode.inner.spec() {
-            Spec::Data(blkaddr) => blkaddr,
-            _ => unimplemented!(),
-        };
-
-        let lastblk = match layout {
-            Layout::FlatInline => nblocks - 1,
-            _ => nblocks,
-        };
-
-        if offset < self.blkpos(lastblk) {
-            let len = self.blkpos(lastblk) - offset;
-            Map {
-                index: 0,
-                offset: 0,
-                logical: AddressMap { start: offset, len },
-                physical: AddressMap {
-                    start: self.blkpos(blkaddr) + offset,
-                    len,
-                },
-            }
-        } else {
-            match layout {
-                Layout::FlatInline => {
-                    let len = inode.inner.inode_size() - offset;
-                    Map {
-                        index: 0,
-                        offset: 0,
-                        logical: AddressMap { start: offset, len },
-                        physical: AddressMap {
-                            start: self.iloc(inode.nid)
-                                + inode.inner.inode_size()
-                                + inode.inner.xattr_size()
-                                + self.blkoff(offset),
-                            len,
-                        },
-                    }
-                }
-                _ => unimplemented!(),
-            }
-        }
-    }
-
-    pub(crate) fn map(&self, inode: &Inode, offset: Off) -> Map {
-        self.flatmap(inode, offset)
-    }
-
-    fn iter_map(&'a self, inode: &'b Inode) -> MapIter<'a, 'b, T> {
-        MapIter::new(self, inode)
-    }
-}
-
-impl<'a, 'b, T> SuperBlockInfo<T>
-where
-    T: FileBackend,
-    'a: 'b,
-{
-    pub(crate) fn block_iter(&'a self, inode: &'b Inode) -> BlockIter<'a, 'b, T> {
-        BlockIter::new(&self.backend, self.iter_map(inode))
-    }
-}
-
-impl<'a, 'b, T> SuperBlockInfo<T>
-where
-    T: MemoryBackend<'a>,
-    'a: 'b,
-{
-    pub(crate) fn block_ref_iter(&'a self, inode: &'b Inode) -> BlockRefIter<'a, 'b, T> {
-        BlockRefIter::new(&self.backend, self.iter_map(inode))
-    }
-}
-
-struct MapIter<'a, 'b, T>
-where
-    T: Backend,
-    'a: 'b,
-{
-    sbi: &'a SuperBlockInfo<T>,
+    sbi: &'a T,
     inode: &'b Inode,
     offset: Off,
     len: Off,
+    _marker: PhantomData<&'a U>,
 }
 
-impl<'a, 'b, T> MapIter<'a, 'b, T>
+impl<'a, 'b, T, U> MapIter<'a, 'b, T, U>
 where
-    T: Backend,
-    'a: 'b,
+    T: SuperBlockInfo<'a, U>,
+    U: Backend,
 {
-    pub fn new(sbi: &'a SuperBlockInfo<T>, inode: &'b Inode) -> Self {
+    pub fn new(sbi: &'a T, inode: &'b Inode) -> Self {
         Self {
             sbi,
             inode,
             offset: 0,
             len: inode.inner.size(),
+            _marker: Default::default(),
         }
     }
 }
 
-impl<'a, 'b, T> Iterator for MapIter<'a, 'b, T>
+impl<'a, 'b, T, U> Iterator for MapIter<'a, 'b, T, U>
 where
-    T: Backend,
-    'a: 'b,
+    T: SuperBlockInfo<'a, U>,
+    U: Backend,
 {
     type Item = Map;
     fn next(&mut self) -> Option<Self::Item> {
@@ -194,29 +119,40 @@ where
     }
 }
 
-pub(crate) struct BlockIter<'a, 'b, T>
+pub(crate) struct BlockIter<'a, 'b, T, U>
 where
-    T: Backend,
-    'a: 'b,
+    T: SuperBlockInfo<'a, U>,
+    U: FileBackend,
 {
-    backend: &'a T,
-    map_iter: MapIter<'a, 'b, T>,
+    backend: &'a U,
+    map_iter: MapIter<'a, 'b, T, U>,
 }
 
-impl<'a, 'b, T> BlockIter<'a, 'b, T>
+impl<'a, 'b, T, U> BlockIter<'a, 'b, T, U>
 where
-    T: FileBackend,
-    'a: 'b,
+    T: SuperBlockInfo<'a, U>,
+    U: FileBackend,
 {
-    pub(crate) fn new(backend: &'a T, map_iter: MapIter<'a, 'b, T>) -> Self {
+    pub(crate) fn new(backend: &'a U, map_iter: MapIter<'a, 'b, T, U>) -> Self {
         Self { backend, map_iter }
+    }
+    pub fn find_nid(self, name: &str) -> Option<Nid> {
+        for block in self {
+            for dirent in DirCollection::new(&block) {
+                let dirname = dirent.dirname(&block);
+                if dirname.start == name.as_bytes() {
+                    return Some(dirent.desc.nid as u64);
+                }
+            }
+        }
+        None
     }
 }
 
-impl<'a, 'b, T> Iterator for BlockIter<'a, 'b, T>
+impl<'a, 'b, T, U> Iterator for BlockIter<'a, 'b, T, U>
 where
-    T: FileBackend,
-    'a: 'b,
+    T: SuperBlockInfo<'a, U>,
+    U: FileBackend,
 {
     type Item = Block;
     fn next(&mut self) -> Option<Self::Item> {
@@ -230,31 +166,43 @@ where
     }
 }
 
-pub(crate) struct BlockRefIter<'a, 'b, T>
+pub(crate) struct BlockRefIter<'a, 'b, T, U>
 where
-    T: MemoryBackend<'a>,
-    'a: 'b,
+    T: SuperBlockInfo<'a, U>,
+    U: MemoryBackend<'a>,
 {
-    backend: &'a T,
-    map_iter: MapIter<'a, 'b, T>,
+    backend: &'a U,
+    map_iter: MapIter<'a, 'b, T, U>,
 }
 
-impl<'a, 'b, T> BlockRefIter<'a, 'b, T>
+impl<'a, 'b, T, U> BlockRefIter<'a, 'b, T, U>
 where
-    T: MemoryBackend<'a>,
-    'a: 'b,
+    T: SuperBlockInfo<'a, U>,
+    U: MemoryBackend<'a>,
 {
-    pub(crate) fn new(backend: &'a T, map_iter: MapIter<'a, 'b, T>) -> Self {
+    pub(crate) fn new(backend: &'a U, map_iter: MapIter<'a, 'b, T, U>) -> Self {
         Self { backend, map_iter }
+    }
+
+    pub(crate) fn find_nid(self, name: &str) -> Option<Nid> {
+        for block in self {
+            for dirent in DirCollection::new(block) {
+                let dirname = dirent.dirname(block);
+                if dirname.start == name.as_bytes() {
+                    return Some(dirent.desc.nid as u64);
+                }
+            }
+        }
+        None
     }
 }
 
-impl<'a, 'b, T> Iterator for BlockRefIter<'a, 'b, T>
+impl<'a, 'b, T, U> Iterator for BlockRefIter<'a, 'b, T, U>
 where
-    T: MemoryBackend<'a>,
-    'a: 'b,
+    T: SuperBlockInfo<'a, U>,
+    U: MemoryBackend<'a>,
 {
-    type Item = &'b Block;
+    type Item = &'a Block;
     fn next(&mut self) -> Option<Self::Item> {
         match self.map_iter.next() {
             Some(m) => match self.backend.as_ref_block(m.physical.start) {

@@ -40,6 +40,7 @@ pub(crate) enum Type {
     Block,
     FIFO,
     Socket,
+    Unknown,
 }
 
 impl Format {
@@ -175,6 +176,23 @@ impl GenericInode {
             _ => Spec::Unknown,
         }
     }
+
+    pub fn inode_type(&self) -> Type {
+        let mode = match self {
+            Self::Extended(extended) => extended.i_mode,
+            Self::Compact(compact) => compact.i_mode,
+        };
+        match mode & 0o170000 {
+            0o40000 => Type::Directory, // Directory
+            0o100000 => Type::Regular,  // Regular File
+            0o120000 => Type::Link,     // Symbolic Link
+            0o10000 => Type::FIFO,      // FIFO
+            0o140000 => Type::Socket,   // Socket
+            0o60000 => Type::Block,     // Block
+            0o20000 => Type::Character, // Character
+            _ => Type::Unknown,
+        }
+    }
 }
 
 pub(crate) type InodeBuf = [u8; size_of::<ExtendedInode>()];
@@ -228,31 +246,6 @@ impl TryFrom<InodeBuf> for GenericInode {
     }
 }
 
-impl<T> SuperBlockInfo<T>
-where
-    T: Backend,
-{
-    pub(crate) fn iloc(&self, nid: Nid) -> Off {
-        let sb = &self.sb;
-        self.blkpos(sb.meta_blkaddr as u32) + ((nid as Off) << (sb.meta_blkaddr as Off))
-    }
-
-    fn read_inode(&self, nid: Nid) -> Inode {
-        let offset = self.iloc(nid);
-        let mut buf: InodeBuf = DEFAULT_INODE_BUF;
-        self.backend
-            .fill(&mut buf, offset, size_of::<InodeBuf>() as u64)
-            .unwrap();
-        Inode {
-            inner: GenericInode::try_from(buf).unwrap(),
-            nid,
-        }
-    }
-
-    pub fn namei(&self, name: &str, len: usize) -> Option<NameiContext> {
-        None
-    }
-}
 
 #[cfg(test)]
 mod tests {

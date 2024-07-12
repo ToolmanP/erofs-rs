@@ -1,6 +1,10 @@
-use crate::compression::SuperblockCompressionInfo;
-use crate::data::Backend;
-use crate::{Blk, Off};
+use crate::data::*;
+use crate::inode::*;
+use crate::map::*;
+use crate::*;
+
+pub mod file;
+pub mod mem;
 
 pub const ISLOTBITS: u8 = 5;
 pub const SB_MAGIC: u32 = 0xE0F5E1E2;
@@ -32,18 +36,6 @@ pub struct SuperBlock {
     pub(crate) xattr_filter_reserved: u8,
     pub(crate) reserved: [u8; 23],
 }
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct SuperBlockInfo<T>
-where
-    T: Backend,
-{
-    pub(crate) sb: SuperBlock,
-    pub(crate) c_info: SuperblockCompressionInfo,
-    pub(crate) islotbits: u8,
-    pub(crate) backend: T,
-}
-
 // SAFETY: SuperBlock uses all ffi-safe types.
 impl From<&[u8]> for SuperBlock {
     fn from(value: &[u8]) -> Self {
@@ -65,47 +57,109 @@ impl From<SuperBlock> for [u8; 128] {
     }
 }
 
-impl<T> SuperBlockInfo<T>
+pub(crate) trait SuperBlockInfo<'a, T>
 where
     T: Backend,
 {
-    pub(crate) fn new(sb: SuperBlock, backend: T) -> Self {
-        Self {
-            sb,
-            c_info: SuperblockCompressionInfo::default(),
-            islotbits: ISLOTBITS,
-            backend,
-        }
+    fn superblock(&self) -> &SuperBlock;
+    fn backend(&self) -> &T;
+    fn blknr(&self, pos: Off) -> Blk {
+        (pos >> self.superblock().blkszbits) as Blk
     }
-}
 
-impl<T> From<SuperBlockInfo<T>> for SuperBlock
-where
-    T: Backend,
-{
-    fn from(value: SuperBlockInfo<T>) -> Self {
-        value.sb
+    fn blkpos(&self, blk: Blk) -> Off {
+        (blk as Off) << self.superblock().blkszbits
     }
-}
 
-impl<T> SuperBlockInfo<T>
-where
-    T: Backend,
-{
-    pub(crate) fn blknr(&self, pos: Off) -> Blk {
-        (pos >> self.sb.blkszbits) as Blk
-    }
-    pub(crate) fn blkpos(&self, blk: Blk) -> Off {
-        (blk as Off) << self.sb.blkszbits
-    }
-    pub(crate) fn blkoff(&self, offset: Off) -> Off {
+    fn blkoff(&self, offset: Off) -> Off {
         offset & (self.blksz() - 1)
     }
-    pub(crate) fn blksz(&self) -> Off {
-        1 << self.sb.blkszbits
+
+    fn blksz(&self) -> Off {
+        1 << self.superblock().blkszbits
     }
-    pub(crate) fn blk_round_up(&self, addr: Off) -> Blk {
-        ((addr + self.blksz() - 1) >> self.sb.blkszbits) as Blk
+
+    fn blk_round_up(&self, addr: Off) -> Blk {
+        ((addr + self.blksz() - 1) >> self.superblock().blkszbits) as Blk
+    }
+
+    fn iloc(&self, nid: Nid) -> Off {
+        let sb = &self.superblock();
+        self.blkpos(sb.meta_blkaddr as u32) + ((nid as Off) << (sb.meta_blkaddr as Off))
+    }
+
+    fn read_inode(&self, nid: Nid) -> Inode {
+        let offset = self.iloc(nid);
+        let mut buf: InodeBuf = DEFAULT_INODE_BUF;
+        self.backend()
+            .fill(&mut buf, offset, core::mem::size_of::<InodeBuf>() as u64)
+            .unwrap();
+        Inode {
+            inner: GenericInode::try_from(buf).unwrap(),
+            nid,
+        }
+    }
+
+    fn flatmap(&self, inode: &Inode, offset: Off) -> Map {
+        let layout = inode.inner.format().layout();
+        let nblocks = self.blk_round_up(inode.inner.size());
+
+        let blkaddr = match inode.inner.spec() {
+            Spec::Data(blkaddr) => blkaddr,
+            _ => unimplemented!(),
+        };
+
+        let lastblk = match layout {
+            Layout::FlatInline => nblocks - 1,
+            _ => nblocks,
+        };
+
+        if offset < self.blkpos(lastblk) {
+            let len = self.blkpos(lastblk) - offset;
+            Map {
+                index: 0,
+                offset: 0,
+                logical: AddressMap { start: offset, len },
+                physical: AddressMap {
+                    start: self.blkpos(blkaddr) + offset,
+                    len,
+                },
+            }
+        } else {
+            match layout {
+                Layout::FlatInline => {
+                    let len = inode.inner.inode_size() - offset;
+                    Map {
+                        index: 0,
+                        offset: 0,
+                        logical: AddressMap { start: offset, len },
+                        physical: AddressMap {
+                            start: self.iloc(inode.nid)
+                                + inode.inner.inode_size()
+                                + inode.inner.xattr_size()
+                                + self.blkoff(offset),
+                            len,
+                        },
+                    }
+                }
+                _ => unimplemented!(),
+            }
+        }
+    }
+
+    fn map(&self, inode: &Inode, offset: Off) -> Map {
+        self.flatmap(inode, offset)
+    }
+
+    fn find_nid(&'a self, inode: &Inode, name: &str) -> Option<Nid>;
+
+    fn ilookup(&'a self, name: &str) -> Option<Inode> {
+        let mut nid = self.superblock().root_nid as Nid;
+        for part in name.split('/') {
+            let inode = self.read_inode(nid);
+            nid = self.find_nid(&inode, part)?;
+        }
+        Some(self.read_inode(nid))
     }
 }
 
