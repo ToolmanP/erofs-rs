@@ -29,7 +29,8 @@ pub(crate) trait Source {
 pub(crate) trait FileSource: Source {}
 
 pub(crate) trait MemorySource<'a>: Source {
-    fn as_ref_block(&'a self, offset: Off) -> SourceResult<&'a Block>;
+    fn as_ref(&'a self, offset: Off, len: Off) -> SourceResult<&'a [u8]>;
+    fn as_mut(&'a mut self, offset: Off, len: Off) -> SourceResult<&'a mut [u8]>;
 }
 
 pub(crate) trait Backend {
@@ -40,37 +41,41 @@ pub(crate) trait Backend {
 pub(crate) trait FileBackend: Backend {}
 
 pub(crate) trait MemoryBackend<'a>: Backend {
-    fn as_ref_block(&'a self, offset: Off) -> BackendResult<&'a Block>;
+    fn as_ref(&'a self, offset: Off, len: Off) -> BackendResult<&'a [u8]>;
+    fn as_mut(&'a mut self, offset: Off, len: Off) -> BackendResult<&'a mut [u8]>;
+}
+
+pub(crate) struct TempBuffer {
+    block: Block,
+    maxsize: usize,
 }
 
 pub(crate) trait Buffer<'a> {
-    fn raw(&'a mut self, offset: Off, len: Off) -> Option<&'a mut [u8]>;
-    fn buflen(&self) -> Off;
+    fn content_mut(&'a mut self) -> &'a mut [u8];
+    fn content(&'a self) -> &'a [u8];
 }
 
-impl<'a> Buffer<'a> for Block {
-    fn raw(&'a mut self, offset: Off, len: Off) -> Option<&'a mut [u8]> {
-        if (offset + len) as usize >= EROFS_BLOCK_SZ {
-            None
-        } else {
-            Some(&mut self[offset as usize..(offset + len) as usize])
-        }
+impl TempBuffer {
+    pub(crate) fn new(block: Block, maxsize: usize) -> Self {
+        Self { block, maxsize }
     }
-    fn buflen(&self) -> Off {
-        EROFS_BLOCK_SZ as u64
+}
+
+impl<'a> Buffer<'a> for TempBuffer {
+    fn content_mut(&'a mut self) -> &'a mut [u8] {
+        &mut self.block[0..self.maxsize]
+    }
+    fn content(&'a self) -> &'a [u8] {
+        &self.block[0..self.maxsize]
     }
 }
 
 impl<'a> Buffer<'a> for [u8] {
-    fn raw(&'a mut self, offset: Off, len: Off) -> Option<&'a mut [u8]> {
-        if ((offset + len) as u64) < self.len() as u64 {
-            Some(&mut self[offset as usize..(offset + len) as usize])
-        } else {
-            None
-        }
+    fn content(&'a self) -> &'a [u8] {
+        self
     }
-    fn buflen(&self) -> Off {
-        self.len() as Off
+    fn content_mut(&'a mut self) -> &'a mut [u8] {
+        self
     }
 }
 
@@ -96,7 +101,7 @@ where
             sbi,
             inode,
             offset: 0,
-            len: inode.inner.size(),
+            len: inode.inner.file_size(),
             _marker: Default::default(),
         }
     }
@@ -109,7 +114,7 @@ where
 {
     type Item = Map;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.offset == self.len {
+        if self.offset >= self.len {
             None
         } else {
             let m = self.sbi.map(self.inode, self.offset);
@@ -119,7 +124,7 @@ where
     }
 }
 
-pub(crate) struct BlockIter<'a, 'b, T, U>
+pub(crate) struct TempBufferIter<'a, 'b, T, U>
 where
     T: SuperBlockInfo<'a, U>,
     U: FileBackend,
@@ -128,7 +133,7 @@ where
     map_iter: MapIter<'a, 'b, T, U>,
 }
 
-impl<'a, 'b, T, U> BlockIter<'a, 'b, T, U>
+impl<'a, 'b, T, U> TempBufferIter<'a, 'b, T, U>
 where
     T: SuperBlockInfo<'a, U>,
     U: FileBackend,
@@ -136,12 +141,11 @@ where
     pub(crate) fn new(backend: &'a U, map_iter: MapIter<'a, 'b, T, U>) -> Self {
         Self { backend, map_iter }
     }
-    pub fn find_nid(self, name: &str) -> Option<Nid> {
-        for block in self {
-            for dirent in DirCollection::new(&block) {
-                let dirname = dirent.dirname(&block);
-                if dirname == name.as_bytes() {
-                    return Some(dirent.desc.nid as u64);
+    pub(crate) fn find_nid(&mut self, name: &str) -> Option<Nid> {
+        for buf in self.into_iter() {
+            for dirent in DirCollection::new(buf.content()) {
+                if dirent.dirname(buf.content()) == name.as_bytes() {
+                    return Some(dirent.desc.nid);
                 }
             }
         }
@@ -149,24 +153,39 @@ where
     }
 }
 
-impl<'a, 'b, T, U> Iterator for BlockIter<'a, 'b, T, U>
+
+impl<'a, 'b, T, U> Iterator for TempBufferIter<'a, 'b, T, U>
 where
     T: SuperBlockInfo<'a, U>,
     U: FileBackend,
 {
-    type Item = Block;
+    type Item = TempBuffer;
     fn next(&mut self) -> Option<Self::Item> {
         match self.map_iter.next() {
-            Some(m) => match self.backend.get_block(m.physical.start) {
-                Ok(block) => Some(block),
-                Err(_) => None,
-            },
+            Some(m) => {
+                if m.logical.len < EROFS_BLOCK_SZ as Off {
+                    let mut block = EROFS_EMPTY_BLOCK;
+                    match self
+                        .backend
+                        .fill(&mut block[0..m.physical.len as usize], m.physical.start)
+                    {
+                        Ok(()) => Some(TempBuffer::new(block, m.physical.len as usize)),
+                        Err(_) => None,
+                    }
+                } else {
+                    match self.backend.get_block(m.physical.start) {
+                        Ok(block) => Some(TempBuffer::new(block, EROFS_BLOCK_SZ)),
+                        Err(_) => None,
+                    }
+                }
+            }
             None => None,
         }
     }
 }
 
-pub(crate) struct BlockRefIter<'a, 'b, T, U>
+
+pub(crate) struct RefIter<'a, 'b, T, U>
 where
     T: SuperBlockInfo<'a, U>,
     U: MemoryBackend<'a>,
@@ -175,7 +194,7 @@ where
     map_iter: MapIter<'a, 'b, T, U>,
 }
 
-impl<'a, 'b, T, U> BlockRefIter<'a, 'b, T, U>
+impl<'a, 'b, T, U> RefIter<'a, 'b, T, U>
 where
     T: SuperBlockInfo<'a, U>,
     U: MemoryBackend<'a>,
@@ -183,13 +202,11 @@ where
     pub(crate) fn new(backend: &'a U, map_iter: MapIter<'a, 'b, T, U>) -> Self {
         Self { backend, map_iter }
     }
-
-    pub(crate) fn find_nid(self, name: &str) -> Option<Nid> {
-        for block in self {
-            for dirent in DirCollection::new(block) {
-                let dirname = dirent.dirname(block);
-                if dirname == name.as_bytes() {
-                    return Some(dirent.desc.nid as u64);
+    pub(crate) fn find_nid(&mut self, name: &str) -> Option<Nid> {
+        for buf in self.into_iter() {
+            for dirent in DirCollection::new(buf) {
+                if dirent.dirname(buf) == name.as_bytes() {
+                    return Some(dirent.desc.nid);
                 }
             }
         }
@@ -197,16 +214,16 @@ where
     }
 }
 
-impl<'a, 'b, T, U> Iterator for BlockRefIter<'a, 'b, T, U>
+impl<'a, 'b, T, U> Iterator for RefIter<'a, 'b, T, U>
 where
     T: SuperBlockInfo<'a, U>,
     U: MemoryBackend<'a>,
 {
-    type Item = &'a Block;
+    type Item = &'a [u8];
     fn next(&mut self) -> Option<Self::Item> {
         match self.map_iter.next() {
-            Some(m) => match self.backend.as_ref_block(m.physical.start) {
-                Ok(block) => Some(block),
+            Some(m) => match self.backend.as_ref(m.physical.start, m.physical.len) {
+                Ok(buf) => Some(buf),
                 Err(_) => None,
             },
             None => None,

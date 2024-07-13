@@ -31,9 +31,15 @@ impl<'a, T> MemoryBackend<'a> for UncompressedBackend<T>
 where
     T: MemorySource<'a>,
 {
-    fn as_ref_block(&'a self, offset: Off) -> BackendResult<&'a Block> {
+    fn as_ref(&'a self, offset: Off, len: Off) -> BackendResult<&'a [u8]> {
         self.source
-            .as_ref_block(offset)
+            .as_ref(offset, len)
+            .map_err(|_| BackendError::Dummy)
+    }
+
+    fn as_mut(&'a mut self, offset: Off, len: Off) -> BackendResult<&'a mut [u8]> {
+        self.source
+            .as_mut(offset, len)
             .map_err(|_| BackendError::Dummy)
     }
 }

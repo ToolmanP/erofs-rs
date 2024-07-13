@@ -1,14 +1,9 @@
+use crate::data::*;
 use crate::*;
-
-use crate::{
-    data::{FileBackend, MemoryBackend},
-    inode::{Inode, Type},
-    superblock::SuperBlockInfo,
-};
 
 #[repr(C, packed)]
 pub(crate) struct DirentDesc {
-    pub nid: u32,
+    pub nid: u64,
     pub nameoff: u16,
     pub file_type: u8,
     pub reserved: u8,
@@ -20,16 +15,16 @@ pub(crate) struct Dirent<'a> {
 }
 
 pub(crate) struct DirCollection<'a> {
-    block: &'a Block,
+    data: &'a [u8],
     offset: usize,
     total: usize,
 }
 
 impl<'a> DirCollection<'a> {
-    pub(crate) fn new(block: &'a Block) -> Self {
-        let desc: &'a DirentDesc = unsafe { &*(block.as_ptr() as *const DirentDesc) };
+    pub(crate) fn new(buffer: &'a [u8]) -> Self {
+        let desc: &'a DirentDesc = unsafe { &*(buffer.as_ptr() as *const DirentDesc) };
         Self {
-            block,
+            data: buffer,
             offset: 0,
             total: desc.nameoff as usize / core::mem::size_of::<DirentDesc>(),
         }
@@ -38,12 +33,12 @@ impl<'a> DirCollection<'a> {
         //SAFETY: Note that DirentDesc is yet another ffi-safe type and the size of Block is larger
         //than that of DirentDesc. It's safe to allow this unsafe cast.
         let descs: &'a [DirentDesc] = unsafe {
-            core::slice::from_raw_parts(self.block.as_ptr() as *const DirentDesc, self.total)
+            core::slice::from_raw_parts(self.data.as_ptr() as *const DirentDesc, self.total)
         };
         if index >= self.total {
             None
         } else if index == self.total - 1 {
-            let len = EROFS_BLOCK_SZ - descs[self.total - 1].nameoff as usize;
+            let len = self.data.len() - descs[self.total - 1].nameoff as usize;
             Some(Dirent {
                 desc: &descs[index],
                 len,
@@ -69,8 +64,8 @@ impl<'a> Iterator for DirCollection<'a> {
 }
 
 impl<'a> Dirent<'a> {
-    pub(crate) fn dirname(&self, block: &'a Block) -> &'a [u8] {
+    pub(crate) fn dirname(&self, buffer: &'a[u8]) -> &'a [u8] {
         let nameoff = self.desc.nameoff as usize;
-        &block[nameoff..nameoff + self.len]
+        &buffer[nameoff..nameoff + self.len]
     }
 }
