@@ -5,6 +5,10 @@ edition = "2021"
 
 [dependencies]
 
+
+[dev-dependencies]
+memmap2 = "0.9.4" # For Testing the Memory Backed Filesystem.
+
 [features]
 default = ["alloc"]
 alloc = []
