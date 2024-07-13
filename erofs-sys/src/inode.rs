@@ -133,7 +133,7 @@ impl GenericInode {
         }
     }
 
-    pub fn size(&self) -> Off {
+    pub fn file_size(&self) -> Off {
         match self {
             Self::Extended(extended) => extended.i_size,
             Self::Compact(compact) => compact.i_size as u64,
@@ -149,7 +149,7 @@ impl GenericInode {
 
     pub fn xattr_size(&self) -> Off {
         match self {
-            Self::Extended(extended) => 5 + 4 * (extended.i_xattr_icount as u64 - 1),
+            Self::Extended(extended) => 12 + 4 * (extended.i_xattr_icount as u64 - 1),
             Self::Compact(_) => 0,
         }
     }

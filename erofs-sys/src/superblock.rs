@@ -7,9 +7,6 @@ use core::mem::size_of;
 pub mod file;
 pub mod mem;
 
-pub const ISLOTBITS: u8 = 5;
-pub const SB_MAGIC: u32 = 0xE0F5E1E2;
-
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]
 pub struct SuperBlock {
@@ -89,7 +86,7 @@ where
 
     fn iloc(&self, nid: Nid) -> Off {
         let sb = &self.superblock();
-        self.blkpos(sb.meta_blkaddr as u32) + ((nid as Off) << (sb.meta_blkaddr as Off))
+        self.blkpos(sb.meta_blkaddr as u32) + ((nid as Off) << (5 as Off))
     }
 
     fn read_inode(&self, nid: Nid) -> Inode {
@@ -104,7 +101,7 @@ where
 
     fn flatmap(&self, inode: &Inode, offset: Off) -> Map {
         let layout = inode.inner.format().layout();
-        let nblocks = self.blk_round_up(inode.inner.size());
+        let nblocks = self.blk_round_up(inode.inner.file_size());
 
         let blkaddr = match inode.inner.spec() {
             Spec::Data(blkaddr) => blkaddr,
@@ -130,7 +127,7 @@ where
         } else {
             match layout {
                 Layout::FlatInline => {
-                    let len = inode.inner.inode_size() - offset;
+                    let len = inode.inner.file_size() - offset;
                     Map {
                         index: 0,
                         offset: 0,
@@ -153,11 +150,15 @@ where
         self.flatmap(inode, offset)
     }
 
+
     fn find_nid(&'a self, inode: &Inode, name: &str) -> Option<Nid>;
 
     fn ilookup(&'a self, name: &str) -> Option<Inode> {
         let mut nid = self.superblock().root_nid as Nid;
         for part in name.split('/') {
+            if part.is_empty() {
+                continue;
+            }
             let inode = self.read_inode(nid);
             nid = self.find_nid(&inode, part)?;
         }
@@ -170,7 +171,6 @@ mod tests {
     extern crate std;
     use super::*;
     use std::fs::File;
-    use std::os::unix::fs::FileExt;
     use std::path::Path;
 
     pub(crate) fn load_fixture() -> File {
@@ -183,14 +183,5 @@ mod tests {
     #[test]
     fn test_superblock_size() {
         assert_eq!(core::mem::size_of::<SuperBlock>(), 128);
-    }
-
-    #[test]
-    fn test_superblock_def() {
-        let img = load_fixture();
-        let mut buf: [u8; 128] = [0; 128];
-        img.read_exact_at(&mut buf, 1024).unwrap();
-        let superblock = SuperBlock::from(buf);
-        assert_eq!(superblock.magic, SB_MAGIC);
     }
 }

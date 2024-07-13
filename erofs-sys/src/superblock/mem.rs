@@ -22,6 +22,6 @@ where
         &self.backend
     }
     fn find_nid(&'a self, inode: &Inode, name: &str) -> Option<Nid> {
-        BlockRefIter::new(&self.backend, MapIter::new(self, inode)).find_nid(name)
+        RefIter::new(&self.backend, MapIter::new(self, inode)).find_nid(name)
     }
 }
