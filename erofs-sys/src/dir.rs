@@ -11,7 +11,7 @@ pub(crate) struct DirentDesc {
 
 pub(crate) struct Dirent<'a> {
     pub desc: &'a DirentDesc,
-    pub len: usize,
+    pub name: &'a [u8],
 }
 
 pub(crate) struct DirCollection<'a> {
@@ -22,7 +22,7 @@ pub(crate) struct DirCollection<'a> {
 
 impl<'a> DirCollection<'a> {
     pub(crate) fn new(buffer: &'a [u8]) -> Self {
-        let desc: &'a DirentDesc = unsafe { &*(buffer.as_ptr() as *const DirentDesc) };
+        let desc: &DirentDesc = unsafe { &*(buffer.as_ptr() as *const DirentDesc) };
         Self {
             data: buffer,
             offset: 0,
@@ -41,13 +41,15 @@ impl<'a> DirCollection<'a> {
             let len = self.data.len() - descs[self.total - 1].nameoff as usize;
             Some(Dirent {
                 desc: &descs[index],
-                len,
+                name: &self.data
+                    [descs[index].nameoff as usize..(descs[index].nameoff as usize) + len],
             })
         } else {
             let len = (descs[index + 1].nameoff - descs[index].nameoff) as usize;
             Some(Dirent {
                 desc: &descs[index],
-                len,
+                name: &self.data
+                    [descs[index].nameoff as usize..(descs[index].nameoff as usize) + len],
             })
         }
     }
@@ -64,8 +66,7 @@ impl<'a> Iterator for DirCollection<'a> {
 }
 
 impl<'a> Dirent<'a> {
-    pub(crate) fn dirname(&self, buffer: &'a[u8]) -> &'a [u8] {
-        let nameoff = self.desc.nameoff as usize;
-        &buffer[nameoff..nameoff + self.len]
+    pub(crate) fn dirname(&self) -> &'a [u8] {
+        self.name
     }
 }

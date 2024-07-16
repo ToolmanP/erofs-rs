@@ -1,4 +1,5 @@
 use super::*;
+use crate::dir::*;
 
 pub struct RawFileSystem<T>
 // Only support standard file/device io. Not a continguous region of memory.
@@ -19,8 +20,8 @@ where
     fn backend(&self) -> &T {
         &self.backend
     }
-    fn find_nid(&'a self, inode: &Inode, name: &str) -> Option<Nid> {
-        TempBufferIter::new(&self.backend, MapIter::new(self, inode)).find_nid(name)
+    fn content_iter(&'a self, inode: &Inode) -> impl Iterator<Item = impl Buffer> {
+        TempBufferIter::new(&self.backend, MapIter::new(self, inode))
     }
 }
 

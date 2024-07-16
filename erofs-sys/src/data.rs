@@ -1,5 +1,4 @@
 pub mod uncompressed;
-
 use core::marker::PhantomData;
 
 use crate::dir::*;
@@ -50,9 +49,8 @@ pub(crate) struct TempBuffer {
     maxsize: usize,
 }
 
-pub(crate) trait Buffer<'a> {
-    fn content_mut(&'a mut self) -> &'a mut [u8];
-    fn content(&'a self) -> &'a [u8];
+pub(crate) trait Buffer {
+    fn content(&self) -> &[u8];
 }
 
 impl TempBuffer {
@@ -61,20 +59,14 @@ impl TempBuffer {
     }
 }
 
-impl<'a> Buffer<'a> for TempBuffer {
-    fn content_mut(&'a mut self) -> &'a mut [u8] {
-        &mut self.block[0..self.maxsize]
-    }
-    fn content(&'a self) -> &'a [u8] {
+impl Buffer for TempBuffer {
+    fn content(&self) -> &[u8] {
         &self.block[0..self.maxsize]
     }
 }
 
-impl<'a> Buffer<'a> for [u8] {
-    fn content(&'a self) -> &'a [u8] {
-        self
-    }
-    fn content_mut(&'a mut self) -> &'a mut [u8] {
+impl Buffer for &[u8] {
+    fn content(&self) -> &[u8] {
         self
     }
 }
@@ -141,18 +133,7 @@ where
     pub(crate) fn new(backend: &'a U, map_iter: MapIter<'a, 'b, T, U>) -> Self {
         Self { backend, map_iter }
     }
-    pub(crate) fn find_nid(&mut self, name: &str) -> Option<Nid> {
-        for buf in self.into_iter() {
-            for dirent in DirCollection::new(buf.content()) {
-                if dirent.dirname(buf.content()) == name.as_bytes() {
-                    return Some(dirent.desc.nid);
-                }
-            }
-        }
-        None
-    }
 }
-
 
 impl<'a, 'b, T, U> Iterator for TempBufferIter<'a, 'b, T, U>
 where
@@ -184,7 +165,6 @@ where
     }
 }
 
-
 pub(crate) struct RefIter<'a, 'b, T, U>
 where
     T: SuperBlockInfo<'a, U>,
@@ -201,16 +181,6 @@ where
 {
     pub(crate) fn new(backend: &'a U, map_iter: MapIter<'a, 'b, T, U>) -> Self {
         Self { backend, map_iter }
-    }
-    pub(crate) fn find_nid(&mut self, name: &str) -> Option<Nid> {
-        for buf in self.into_iter() {
-            for dirent in DirCollection::new(buf) {
-                if dirent.dirname(buf) == name.as_bytes() {
-                    return Some(dirent.desc.nid);
-                }
-            }
-        }
-        None
     }
 }
 
@@ -230,3 +200,4 @@ where
         }
     }
 }
+

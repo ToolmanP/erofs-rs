@@ -1,4 +1,5 @@
 use crate::data::*;
+use crate::dir::*;
 use crate::inode::*;
 use crate::map::*;
 use crate::*;
@@ -150,8 +151,26 @@ where
         self.flatmap(inode, offset)
     }
 
+    fn content_iter(&'a self, inode: &Inode) -> impl Iterator<Item = impl Buffer>;
 
-    fn find_nid(&'a self, inode: &Inode, name: &str) -> Option<Nid>;
+    fn fill_dentries(&'a self, inode: &Inode, emitter: impl Fn(Dirent) -> ()) {
+        for buf in self.content_iter(inode) {
+            for dirent in DirCollection::new(buf.content()) {
+                emitter(dirent)
+            }
+        }
+    }
+
+    fn find_nid(&'a self, inode: &Inode, name: &str) -> Option<Nid> {
+        for buf in self.content_iter(inode) {
+            for dirent in DirCollection::new(buf.content()) {
+                if dirent.dirname() == name.as_bytes() {
+                    return Some(dirent.desc.nid);
+                }
+            }
+        }
+        None
+    }
 
     fn ilookup(&'a self, name: &str) -> Option<Inode> {
         let mut nid = self.superblock().root_nid as Nid;
