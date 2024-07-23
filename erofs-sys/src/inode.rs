@@ -1,16 +1,8 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-only
 
-use crate::data::Backend;
-use crate::superblock::SuperBlockInfo;
-use crate::*;
-
+use super::*;
 use core::mem::size_of;
-
-pub(crate) struct NameiContext {
-    pub(crate) nid: Nid,
-    pub(crate) ftype: u32,
-}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
