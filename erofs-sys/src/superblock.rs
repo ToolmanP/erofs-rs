@@ -1,11 +1,13 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-only
 
-use crate::data::*;
-use crate::dir::*;
-use crate::inode::*;
-use crate::map::*;
-use crate::*;
+use alloc::boxed::Box;
+
+use super::data::*;
+use super::dir::*;
+use super::inode::*;
+use super::map::*;
+use super::*;
 use core::mem::size_of;
 
 pub mod file;
@@ -62,12 +64,10 @@ impl From<SuperBlock> for [u8; 128] {
 pub(crate) type SuperBlockBuf = [u8; size_of::<SuperBlock>()];
 pub(crate) const SUPERBLOCK_EMPTY_BUF: SuperBlockBuf = [0; size_of::<SuperBlock>()];
 
-pub(crate) trait SuperBlockInfo<'a, T>
-where
-    T: Backend,
-{
+pub(crate) trait FileSystem {
     fn superblock(&self) -> &SuperBlock;
-    fn backend(&self) -> &T;
+
+    fn backend(&self) -> &dyn Backend;
     fn blknr(&self, pos: Off) -> Blk {
         (pos >> self.superblock().blkszbits) as Blk
     }
@@ -154,9 +154,18 @@ where
         self.flatmap(inode, offset)
     }
 
-    fn content_iter(&'a self, inode: &Inode) -> impl Iterator<Item = impl Buffer>;
+    // TODO:: Remove the Box<dyn Iterator> here
+    // Maybe create another wrapper type and we implement the Iterator there? 
+    // Seems unachievable because of static dispatch of Buffer is not allowed at compile time
+    // If we want to have trait object that can be exported to c_void
+    // Leave it as it is for tradeoffs
+    
+    fn content_iter<'b, 'a: 'b>(
+        &'a self,
+        inode: &'b Inode,
+    ) -> Box<dyn Iterator<Item = Box<dyn Buffer + 'b>> + 'b>;
 
-    fn fill_dentries(&'a self, inode: &Inode, emitter: impl Fn(Dirent) -> ()) {
+    fn fill_dentries(&self, inode: &Inode, emitter: &dyn Fn(Dirent)) {
         for buf in self.content_iter(inode) {
             for dirent in DirCollection::new(buf.content()) {
                 emitter(dirent)
@@ -164,7 +173,7 @@ where
         }
     }
 
-    fn find_nid(&'a self, inode: &Inode, name: &str) -> Option<Nid> {
+    fn find_nid(&self, inode: &Inode, name: &str) -> Option<Nid> {
         for buf in self.content_iter(inode) {
             for dirent in DirCollection::new(buf.content()) {
                 if dirent.dirname() == name.as_bytes() {
@@ -175,7 +184,7 @@ where
         None
     }
 
-    fn ilookup(&'a self, name: &str) -> Option<Inode> {
+    fn ilookup(&self, name: &str) -> Option<Inode> {
         let mut nid = self.superblock().root_nid as Nid;
         for part in name.split('/') {
             if part.is_empty() {
@@ -194,12 +203,22 @@ mod tests {
     use super::*;
     use std::fs::File;
     use std::path::Path;
+    pub(crate) const SB_MAGIC: u32 = 0xE0F5E1E2;
 
     pub(crate) fn load_fixture() -> File {
         let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/sample.img"));
-        let file = File::open(path);
+        let file = File::options().read(true).write(true).open(path);
         assert!(file.is_ok());
         file.unwrap()
+    }
+
+    pub(crate) fn test_superblock_def(filesystem: &dyn FileSystem) {
+        assert_eq!(filesystem.superblock().magic, SB_MAGIC);
+    }
+
+    pub(crate) fn test_filesystem_ilookup(filesystem: &dyn FileSystem) {
+        let inode = filesystem.ilookup("/texts/lipsum.txt").unwrap();
+        assert_eq!(inode.nid, 640);
     }
 
     #[test]

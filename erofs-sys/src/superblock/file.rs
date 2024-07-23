@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT or GPL-2.0-only
 
 use super::*;
-use crate::dir::*;
 
 pub struct RawFileSystem<T>
 // Only support standard file/device io. Not a continguous region of memory.
@@ -13,18 +12,24 @@ where
     sb: SuperBlock,
 }
 
-impl<'a, T> SuperBlockInfo<'a, T> for RawFileSystem<T>
+impl<T> FileSystem for RawFileSystem<T>
 where
     T: FileBackend,
 {
     fn superblock(&self) -> &SuperBlock {
         &self.sb
     }
-    fn backend(&self) -> &T {
+    fn backend(&self) -> &dyn Backend {
         &self.backend
     }
-    fn content_iter(&'a self, inode: &Inode) -> impl Iterator<Item = impl Buffer> {
-        TempBufferIter::new(&self.backend, MapIter::new(self, inode))
+    fn content_iter<'b, 'a: 'b>(
+        &'a self,
+        inode: &'b Inode,
+    ) -> Box<dyn Iterator<Item = Box<dyn Buffer + 'b>> + 'b> {
+        Box::new(TempBufferIter::new(
+            &self.backend,
+            MapIter::new(self, inode),
+        ))
     }
 }
 
@@ -44,45 +49,30 @@ where
 
 #[cfg(test)]
 mod tests {
+    extern crate alloc;
     extern crate std;
+    use alloc::boxed::Box;
+
     use super::*;
+    use crate::data::uncompressed::UncompressedBackend;
+    use crate::superblock::tests::*;
     use std::fs::File;
     use std::os::unix::fs::FileExt;
-
-    use crate::data::uncompressed::UncompressedBackend;
-    use crate::superblock::tests::load_fixture;
-
-    pub(crate) const SB_MAGIC: u32 = 0xE0F5E1E2;
 
     impl Source for File {
         fn fill(&self, data: &mut [u8], offset: Off) -> SourceResult<()> {
             self.read_exact_at(data, offset)
                 .map_err(|_| SourceError::Dummy)
         }
-        fn get_block(&self, offset: Off) -> SourceResult<Block> {
-            let mut block: Block = EROFS_EMPTY_BLOCK;
-            self.fill(&mut block, round!(DOWN, offset, EROFS_BLOCK_SZ as Off))
-                .map(|()| block)
-        }
     }
 
     impl FileSource for File {}
 
-    fn get_uncompressed_filesystem() -> RawFileSystem<UncompressedBackend<File>> {
+    #[test]
+    fn test_uncompressed_img_filesystem() {
         let file = load_fixture();
-        RawFileSystem::new(UncompressedBackend::new(file))
-    }
-
-    #[test]
-    fn test_superblock_def() {
-        let filesystem = get_uncompressed_filesystem();
-        assert_eq!(filesystem.superblock().magic, SB_MAGIC);
-    }
-
-    #[test]
-    fn test_filesystem_ilookup() {
-        let filesystem = get_uncompressed_filesystem();
-        let inode = filesystem.ilookup("/texts/lipsum.txt").unwrap();
-        assert_eq!(inode.nid, 640);
+        let filesystem: Box<dyn FileSystem> = Box::new(RawFileSystem::new(UncompressedBackend::new(file)));
+        test_superblock_def(filesystem.as_ref());
+        test_filesystem_ilookup(filesystem.as_ref());
     }
 }
