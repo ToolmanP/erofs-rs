@@ -6,7 +6,6 @@ pub(crate) const EROFS_BLOCK_SZ: usize = 4096;
 pub(crate) const EROFS_EMPTY_BLOCK: Block = [0; EROFS_BLOCK_SZ];
 pub(crate) const EROFS_SUPER_OFFSET: Off = 1024;
 
-
 // It's unavoidable to import alloc here. Since there are so many backends there and if we want to
 // to use trait object to export Filesystem pointer. The alloc crate here is necessary.
 extern crate alloc;
@@ -19,8 +18,8 @@ pub type Nid = u64;
 mod compression;
 mod data;
 mod dir;
-mod map;
 mod inode;
+mod map;
 mod superblock;
 
 #[macro_export]

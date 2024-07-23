@@ -71,7 +71,8 @@ mod tests {
     #[test]
     fn test_uncompressed_img_filesystem() {
         let file = load_fixture();
-        let filesystem: Box<dyn FileSystem> = Box::new(RawFileSystem::new(UncompressedBackend::new(file)));
+        let filesystem: Box<dyn FileSystem> =
+            Box::new(RawFileSystem::new(UncompressedBackend::new(file)));
         test_superblock_def(filesystem.as_ref());
         test_filesystem_ilookup(filesystem.as_ref());
     }

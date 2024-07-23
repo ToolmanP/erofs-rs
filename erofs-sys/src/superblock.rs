@@ -155,11 +155,11 @@ pub(crate) trait FileSystem {
     }
 
     // TODO:: Remove the Box<dyn Iterator> here
-    // Maybe create another wrapper type and we implement the Iterator there? 
+    // Maybe create another wrapper type and we implement the Iterator there?
     // Seems unachievable because of static dispatch of Buffer is not allowed at compile time
     // If we want to have trait object that can be exported to c_void
     // Leave it as it is for tradeoffs
-    
+
     fn content_iter<'b, 'a: 'b>(
         &'a self,
         inode: &'b Inode,

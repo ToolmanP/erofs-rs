@@ -8,13 +8,10 @@ pub enum SuperblockCompressionInfo {
     Lz4MaxDistance(u16),
 }
 
-
 #[allow(dead_code)]
-pub enum InodeCompressionInfo {
+pub enum InodeCompressionInfo {}
 
-}
-
-impl Default for SuperblockCompressionInfo{
+impl Default for SuperblockCompressionInfo {
     fn default() -> Self {
         Self::AvailableComprAlgs(0)
     }

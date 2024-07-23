@@ -45,7 +45,6 @@ where
     }
 }
 
-
 impl<T: Source> UncompressedBackend<T> {
     pub(crate) fn new(source: T) -> Self {
         Self { source }

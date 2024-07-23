@@ -241,7 +241,6 @@ impl TryFrom<InodeBuf> for GenericInode {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
