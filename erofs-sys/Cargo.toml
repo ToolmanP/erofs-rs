@@ -2,13 +2,18 @@
 name = "erofs-sys"
 version = "0.1.0"
 edition = "2021"
+authors = ["Yiyang Wu <toolmanp@tlmp.cc>"]
+description = "Rust core implementation of the Extended Read Only FileSystem"
+license = "MIT"
+homepage = "https://github.com/ToolmanP/erofs-rs"
+repository = "https://github.com/ToolmanP/erofs-rs"
+readme = "README.md"
+keywords = ["filesystem"]
 
 [dependencies]
-
 
 [dev-dependencies]
 memmap2 = "0.9.4" # For Testing the Memory Backed Filesystem.
 
 [features]
 default = ["alloc"]
-alloc = []
