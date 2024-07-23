@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: MIT or GPL-2.0-only
 
 pub mod uncompressed;
-use core::marker::PhantomData;
 
-use crate::dir::*;
-use crate::inode::*;
-use crate::map::*;
-use crate::superblock::SuperBlockInfo;
-use crate::*;
+use alloc::boxed::Box;
+
+use super::inode::*;
+use super::map::*;
+use super::superblock::FileSystem;
+use super::*;
+use core::marker::PhantomData;
 
 #[derive(Debug)]
 pub(crate) enum SourceError {
@@ -25,14 +26,18 @@ pub(crate) type BackendResult<T> = Result<T, BackendError>;
 
 pub(crate) trait Source {
     fn fill(&self, data: &mut [u8], offset: Off) -> SourceResult<()>;
-    fn get_block(&self, offset: Off) -> SourceResult<Block>;
+    fn get_block(&self, offset: Off) -> SourceResult<Block> {
+        let mut block: Block = EROFS_EMPTY_BLOCK;
+        self.fill(&mut block, round!(DOWN, offset, EROFS_BLOCK_SZ as Off))
+            .map(|()| block)
+    }
 }
 
 pub(crate) trait FileSource: Source {}
 
 pub(crate) trait MemorySource<'a>: Source {
-    fn as_ref(&'a self, offset: Off, len: Off) -> SourceResult<&'a [u8]>;
-    fn as_mut(&'a mut self, offset: Off, len: Off) -> SourceResult<&'a mut [u8]>;
+    fn as_buf(&'a self, offset: Off, len: Off) -> SourceResult<MemBuffer<'a>>;
+    fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> SourceResult<MemBufferMut<'a>>;
 }
 
 pub(crate) trait Backend {
@@ -43,8 +48,8 @@ pub(crate) trait Backend {
 pub(crate) trait FileBackend: Backend {}
 
 pub(crate) trait MemoryBackend<'a>: Backend {
-    fn as_ref(&'a self, offset: Off, len: Off) -> BackendResult<&'a [u8]>;
-    fn as_mut(&'a mut self, offset: Off, len: Off) -> BackendResult<&'a mut [u8]>;
+    fn as_buf(&'a self, offset: Off, len: Off) -> BackendResult<MemBuffer<'a>>;
+    fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> BackendResult<MemBufferMut<'a>>;
 }
 
 pub(crate) struct TempBuffer {
@@ -54,6 +59,10 @@ pub(crate) struct TempBuffer {
 
 pub(crate) trait Buffer {
     fn content(&self) -> &[u8];
+}
+
+pub(crate) trait BufferMut: Buffer {
+    fn content_mut(&mut self) -> &mut [u8];
 }
 
 impl TempBuffer {
@@ -68,15 +77,60 @@ impl Buffer for TempBuffer {
     }
 }
 
-impl Buffer for &[u8] {
+impl BufferMut for TempBuffer {
+    fn content_mut(&mut self) -> &mut [u8] {
+        &mut self.block[0..self.maxsize]
+    }
+}
+
+pub(crate) struct MemBuffer<'a> {
+    buf: &'a [u8],
+}
+
+impl Buffer for [u8] {
     fn content(&self) -> &[u8] {
         self
     }
 }
 
+impl BufferMut for [u8] {
+    fn content_mut(&mut self) -> &mut [u8] {
+        self
+    }
+}
+
+impl<'a> Buffer for MemBuffer<'a> {
+    fn content(&self) -> &[u8] {
+        self.buf
+    }
+}
+
+impl<'a> MemBuffer<'a> {
+    pub fn new(buf: &'a [u8]) -> Self {
+        Self { buf }
+    }
+}
+
+pub(crate) struct MemBufferMut<'a> {
+    buf: &'a mut [u8],
+    put_buf: fn(*mut core::ffi::c_void),
+}
+
+impl<'a> MemBufferMut<'a> {
+    pub fn new(buf: &'a mut [u8], put_buf: fn(*mut core::ffi::c_void)) -> Self {
+        Self { buf, put_buf }
+    }
+}
+
+impl<'a> Drop for MemBufferMut<'a> {
+    fn drop(&mut self) {
+        (self.put_buf)(self.buf.as_mut_ptr() as *mut core::ffi::c_void)
+    }
+}
+
 pub(crate) struct MapIter<'a, 'b, T, U>
 where
-    T: SuperBlockInfo<'a, U>,
+    T: FileSystem,
     U: Backend,
 {
     sbi: &'a T,
@@ -88,7 +142,7 @@ where
 
 impl<'a, 'b, T, U> MapIter<'a, 'b, T, U>
 where
-    T: SuperBlockInfo<'a, U>,
+    T: FileSystem,
     U: Backend,
 {
     pub fn new(sbi: &'a T, inode: &'b Inode) -> Self {
@@ -104,7 +158,7 @@ where
 
 impl<'a, 'b, T, U> Iterator for MapIter<'a, 'b, T, U>
 where
-    T: SuperBlockInfo<'a, U>,
+    T: FileSystem,
     U: Backend,
 {
     type Item = Map;
@@ -121,7 +175,7 @@ where
 
 pub(crate) struct TempBufferIter<'a, 'b, T, U>
 where
-    T: SuperBlockInfo<'a, U>,
+    T: FileSystem,
     U: FileBackend,
 {
     backend: &'a U,
@@ -130,7 +184,7 @@ where
 
 impl<'a, 'b, T, U> TempBufferIter<'a, 'b, T, U>
 where
-    T: SuperBlockInfo<'a, U>,
+    T: FileSystem,
     U: FileBackend,
 {
     pub(crate) fn new(backend: &'a U, map_iter: MapIter<'a, 'b, T, U>) -> Self {
@@ -140,10 +194,10 @@ where
 
 impl<'a, 'b, T, U> Iterator for TempBufferIter<'a, 'b, T, U>
 where
-    T: SuperBlockInfo<'a, U>,
+    T: FileSystem,
     U: FileBackend,
 {
-    type Item = TempBuffer;
+    type Item = Box<dyn Buffer + 'a>;
     fn next(&mut self) -> Option<Self::Item> {
         match self.map_iter.next() {
             Some(m) => {
@@ -153,12 +207,12 @@ where
                         .backend
                         .fill(&mut block[0..m.physical.len as usize], m.physical.start)
                     {
-                        Ok(()) => Some(TempBuffer::new(block, m.physical.len as usize)),
+                        Ok(()) => Some(Box::new(TempBuffer::new(block, m.physical.len as usize))),
                         Err(_) => None,
                     }
                 } else {
                     match self.backend.get_block(m.physical.start) {
-                        Ok(block) => Some(TempBuffer::new(block, EROFS_BLOCK_SZ)),
+                        Ok(block) => Some(Box::new(TempBuffer::new(block, EROFS_BLOCK_SZ))),
                         Err(_) => None,
                     }
                 }
@@ -170,7 +224,7 @@ where
 
 pub(crate) struct RefIter<'a, 'b, T, U>
 where
-    T: SuperBlockInfo<'a, U>,
+    T: FileSystem,
     U: MemoryBackend<'a>,
 {
     backend: &'a U,
@@ -179,7 +233,7 @@ where
 
 impl<'a, 'b, T, U> RefIter<'a, 'b, T, U>
 where
-    T: SuperBlockInfo<'a, U>,
+    T: FileSystem,
     U: MemoryBackend<'a>,
 {
     pub(crate) fn new(backend: &'a U, map_iter: MapIter<'a, 'b, T, U>) -> Self {
@@ -189,18 +243,17 @@ where
 
 impl<'a, 'b, T, U> Iterator for RefIter<'a, 'b, T, U>
 where
-    T: SuperBlockInfo<'a, U>,
+    T: FileSystem,
     U: MemoryBackend<'a>,
 {
-    type Item = &'a [u8];
+    type Item = Box<dyn Buffer + 'a>;
     fn next(&mut self) -> Option<Self::Item> {
         match self.map_iter.next() {
-            Some(m) => match self.backend.as_ref(m.physical.start, m.physical.len) {
-                Ok(buf) => Some(buf),
+            Some(m) => match self.backend.as_buf(m.physical.start, m.physical.len) {
+                Ok(buf) => Some(Box::new(buf)),
                 Err(_) => None,
             },
             None => None,
         }
     }
 }
-

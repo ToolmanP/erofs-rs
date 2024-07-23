@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT or GPL-2.0-only
 
 use super::*;
-use crate::*;
 
 pub(crate) struct UncompressedBackend<T>
 where
@@ -34,18 +33,18 @@ impl<'a, T> MemoryBackend<'a> for UncompressedBackend<T>
 where
     T: MemorySource<'a>,
 {
-    fn as_ref(&'a self, offset: Off, len: Off) -> BackendResult<&'a [u8]> {
+    fn as_buf(&'a self, offset: Off, len: Off) -> BackendResult<MemBuffer<'a>> {
         self.source
-            .as_ref(offset, len)
+            .as_buf(offset, len)
             .map_err(|_| BackendError::Dummy)
     }
-
-    fn as_mut(&'a mut self, offset: Off, len: Off) -> BackendResult<&'a mut [u8]> {
+    fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> BackendResult<MemBufferMut<'a>> {
         self.source
-            .as_mut(offset, len)
+            .as_buf_mut(offset, len)
             .map_err(|_| BackendError::Dummy)
     }
 }
+
 
 impl<T: Source> UncompressedBackend<T> {
     pub(crate) fn new(source: T) -> Self {
