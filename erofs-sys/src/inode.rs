@@ -32,6 +32,8 @@ pub(crate) enum Layout {
     Unknown,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Type {
     Regular,
     Directory,
@@ -104,13 +106,13 @@ pub(crate) enum InodeInfo {
     Compact(CompactInodeInfo),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct ChunkSpec {
     chunkformat: u16,
     chunkbits: u8,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) enum Spec {
     Chunk(ChunkSpec),
     Data(u32),
@@ -262,8 +264,8 @@ pub trait InodeCollection {
 pub(crate) mod tests {
 
     extern crate std;
-    use std::collections::{hash_map::Entry, HashMap};
     use super::*;
+    use std::collections::{hash_map::Entry, HashMap};
 
     #[test]
     fn test_inode_size() {

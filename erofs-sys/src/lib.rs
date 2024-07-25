@@ -20,6 +20,7 @@ mod data;
 mod dir;
 mod inode;
 mod map;
+mod operations;
 mod superblock;
 
 #[macro_export]

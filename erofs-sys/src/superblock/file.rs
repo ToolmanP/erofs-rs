@@ -54,10 +54,10 @@ mod tests {
     extern crate std;
     use super::*;
     use crate::inode::tests::*;
-    use crate::superblock::uncompressed::*;
     use crate::superblock::tests::*;
-    use core::mem::MaybeUninit;
+    use crate::superblock::uncompressed::*;
     use alloc::boxed::Box;
+    use core::mem::MaybeUninit;
     use std::collections::HashMap;
     use std::fs::File;
     use std::os::unix::fs::FileExt;
@@ -74,13 +74,12 @@ mod tests {
     #[test]
     fn test_uncompressed_img_filesystem() {
         let file = load_fixture();
-        let mut filesystem: BufferedFileSystem<SimpleInode, HashMap<Nid, MaybeUninit<SimpleInode>>> =
-            BufferedFileSystem::new(
+        let mut filesystem: SuperblockInfo<SimpleInode, HashMap<Nid, MaybeUninit<SimpleInode>>> =
+            SuperblockInfo::new(
                 Box::new(RawFileSystem::new(UncompressedBackend::new(file))),
                 HashMap::new(),
             );
         test_superblock_def(&mut filesystem);
-        test_filesystem_ilookup(&mut filesystem);
-        test_filesystem_ilookup(&mut filesystem);
+        let inode = test_filesystem_ilookup(&mut filesystem);
     }
 }

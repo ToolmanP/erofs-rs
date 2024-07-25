@@ -53,16 +53,15 @@ where
 mod tests {
     extern crate std;
     use super::*;
-    use core::mem::MaybeUninit;
-    use crate::inode::tests::*;
     use crate::data::MemBuffer;
+    use crate::inode::tests::*;
     use crate::superblock::tests::*;
     use crate::superblock::uncompressed::*;
-    use crate::Off;
-    use std::collections::HashMap;
-    use memmap2::MmapMut;
-
     use crate::superblock::MemorySource;
+    use crate::Off;
+    use core::mem::MaybeUninit;
+    use memmap2::MmapMut;
+    use std::collections::HashMap;
 
     // Impl MmapMut to simulate a in-memory image/filesystem
     impl Source for MmapMut {
@@ -98,15 +97,13 @@ mod tests {
     #[test]
     fn test_uncompressed_mmap_filesystem() {
         let file = load_fixture();
-        let mut filesystem: BufferedFileSystem<
-            SimpleInode,
-            HashMap<Nid, MaybeUninit<SimpleInode>>,
-        > = BufferedFileSystem::new(
-            Box::new(MemFileSystem::new(UncompressedBackend::new(unsafe {
-                MmapMut::map_mut(&file).unwrap()
-            }))),
-            HashMap::new(),
-        );
+        let mut filesystem: SuperblockInfo<SimpleInode, HashMap<Nid, MaybeUninit<SimpleInode>>> =
+            SuperblockInfo::new(
+                Box::new(MemFileSystem::new(UncompressedBackend::new(unsafe {
+                    MmapMut::map_mut(&file).unwrap()
+                }))),
+                HashMap::new(),
+            );
         test_superblock_def(&mut filesystem);
         test_filesystem_ilookup(&mut filesystem);
     }

@@ -184,16 +184,16 @@ where
     }
 }
 
-pub struct BufferedFileSystem<I, C>
+pub struct SuperblockInfo<I, C>
 where
     I: Inode,
     C: InodeCollection<I = I>,
 {
-    filesystem: Box<dyn FileSystem<I>>,
-    collection: C,
+    pub(crate) filesystem: Box<dyn FileSystem<I>>,
+    pub(crate) inodes: C,
 }
 
-impl<I, C> BufferedFileSystem<I, C>
+impl<I, C> SuperblockInfo<I, C>
 where
     I: Inode,
     C: InodeCollection<I = I>,
@@ -201,39 +201,8 @@ where
     fn new(fs: Box<dyn FileSystem<I>>, c: C) -> Self {
         Self {
             filesystem: fs,
-            collection: c,
+            inodes: c,
         }
-    }
-
-    fn read_inode<'a>(
-        filesystem: &'a Box<dyn FileSystem<I>>,
-        collection: &'a mut C,
-        nid: Nid,
-    ) -> &'a mut I {
-        let (inode, is_init) = collection.iget(nid);
-        if !is_init {
-            inode.write(I::new(filesystem.read_inode_info(nid), nid));
-        }
-        unsafe { inode.assume_init_mut() }
-    }
-
-    fn superblock(&self) -> &SuperBlock {
-        self.filesystem.superblock()
-    }
-    fn ilookup<'a>(&'a mut self, name: &str) -> Option<&'a mut I> {
-        let mut nid = self.filesystem.superblock().root_nid as Nid;
-        for part in name.split('/') {
-            if part.is_empty() {
-                continue;
-            }
-            let inode = Self::read_inode(&self.filesystem, &mut self.collection, nid);
-            nid = self.filesystem.find_nid(inode, part)?
-        }
-        Some(Self::read_inode(
-            &self.filesystem,
-            &mut self.collection,
-            nid,
-        ))
     }
 }
 
@@ -243,14 +212,19 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::inode::tests::*;
+    use crate::operations::*;
+    use alloc::vec::Vec;
     use core::mem::MaybeUninit;
+    use hex_literal::hex;
+    use sha2::{Digest, Sha512};
     use std::collections::HashMap;
     use std::fs::File;
     use std::path::Path;
+
     pub(crate) const SB_MAGIC: u32 = 0xE0F5E1E2;
 
     pub(crate) type SimpleBufferedFileSystem =
-        BufferedFileSystem<SimpleInode, HashMap<Nid, MaybeUninit<SimpleInode>>>;
+        SuperblockInfo<SimpleInode, HashMap<Nid, MaybeUninit<SimpleInode>>>;
 
     pub(crate) fn load_fixture() -> File {
         let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/sample.img"));
@@ -259,13 +233,29 @@ pub(crate) mod tests {
         file.unwrap()
     }
 
-    pub(crate) fn test_superblock_def(filesystem: &mut SimpleBufferedFileSystem) {
-        assert_eq!(filesystem.superblock().magic, SB_MAGIC);
+    pub(crate) fn test_superblock_def(sbi: &mut SimpleBufferedFileSystem) {
+        assert_eq!(sbi.filesystem.superblock().magic, SB_MAGIC);
     }
 
-    pub(crate) fn test_filesystem_ilookup(filesystem: &mut SimpleBufferedFileSystem) {
-        let inode = filesystem.ilookup("/texts/lipsum.txt").unwrap();
-        assert_eq!(*inode.nid(), 640);
+    const SAMPLE_HEX: [u8;64] = hex!("6846740fd4c03c86524d39e0012ec8eb1e4b87e8a90c65227904148bc0e4d0592c209151a736946133cd57f7ec59c4e8a445e7732322dda9ce356f8d0100c4ca");
+    const SAMPLE_NID: u64 = 640;
+    const SAMPLE_FILE_SIZE: u64 = 5060;
+    const SAMPLE_TYPE: Type = Type::Regular;
+
+    pub(crate) fn test_filesystem_ilookup(sbi: &mut SimpleBufferedFileSystem) {
+        let inode = ilookup(&*sbi.filesystem, &mut sbi.inodes, "/texts/lipsum.txt").unwrap();
+        assert_eq!(*inode.nid(), SAMPLE_NID);
+        assert_eq!(inode.info().inode_type(), SAMPLE_TYPE);
+        assert_eq!(inode.info().file_size(), SAMPLE_FILE_SIZE);
+
+        let mut bytes: Vec<u8> = Vec::new();
+        for block in sbi.filesystem.content_iter(inode) {
+            bytes.extend_from_slice(block.content());
+        }
+        let mut hasher = Sha512::new();
+        hasher.update(&bytes);
+        let result = hasher.finalize();
+        assert_eq!(result[..], SAMPLE_HEX);
     }
 
     #[test]
