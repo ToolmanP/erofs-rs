@@ -15,9 +15,10 @@ where
     sb: SuperBlock,
 }
 
-impl<T> FileSystem for MemFileSystem<T>
+impl<I, T> FileSystem<I> for MemFileSystem<T>
 where
     T: for<'a> MemoryBackend<'a>,
+    I: Inode,
 {
     fn superblock(&self) -> &SuperBlock {
         &self.sb
@@ -28,7 +29,7 @@ where
 
     fn content_iter<'b, 'a: 'b>(
         &'a self,
-        inode: &'b Inode,
+        inode: &'b I,
     ) -> Box<dyn Iterator<Item = Box<dyn Buffer + 'b>> + 'b> {
         Box::new(RefIter::new(&self.backend, MapIter::new(self, inode)))
     }
@@ -50,13 +51,15 @@ where
 
 #[cfg(test)]
 mod tests {
-    extern crate alloc;
     extern crate std;
     use super::*;
+    use core::mem::MaybeUninit;
+    use crate::inode::tests::*;
     use crate::data::MemBuffer;
     use crate::superblock::tests::*;
     use crate::superblock::uncompressed::*;
     use crate::Off;
+    use std::collections::HashMap;
     use memmap2::MmapMut;
 
     use crate::superblock::MemorySource;
@@ -95,11 +98,16 @@ mod tests {
     #[test]
     fn test_uncompressed_mmap_filesystem() {
         let file = load_fixture();
-        let filesystem: Box<dyn FileSystem> =
+        let mut filesystem: BufferedFileSystem<
+            SimpleInode,
+            HashMap<Nid, MaybeUninit<SimpleInode>>,
+        > = BufferedFileSystem::new(
             Box::new(MemFileSystem::new(UncompressedBackend::new(unsafe {
                 MmapMut::map_mut(&file).unwrap()
-            })));
-        test_superblock_def(filesystem.as_ref());
-        test_filesystem_ilookup(filesystem.as_ref());
+            }))),
+            HashMap::new(),
+        );
+        test_superblock_def(&mut filesystem);
+        test_filesystem_ilookup(&mut filesystem);
     }
 }

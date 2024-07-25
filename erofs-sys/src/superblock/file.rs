@@ -3,18 +3,19 @@
 
 use super::*;
 
-pub struct RawFileSystem<T>
+pub struct RawFileSystem<B>
 // Only support standard file/device io. Not a continguous region of memory.
 where
-    T: FileBackend,
+    B: FileBackend,
 {
-    backend: T,
+    backend: B,
     sb: SuperBlock,
 }
 
-impl<T> FileSystem for RawFileSystem<T>
+impl<I, B> FileSystem<I> for RawFileSystem<B>
 where
-    T: FileBackend,
+    B: FileBackend,
+    I: Inode,
 {
     fn superblock(&self) -> &SuperBlock {
         &self.sb
@@ -24,7 +25,7 @@ where
     }
     fn content_iter<'b, 'a: 'b>(
         &'a self,
-        inode: &'b Inode,
+        inode: &'b I,
     ) -> Box<dyn Iterator<Item = Box<dyn Buffer + 'b>> + 'b> {
         Box::new(TempBufferIter::new(
             &self.backend,
@@ -51,11 +52,13 @@ where
 mod tests {
     extern crate alloc;
     extern crate std;
-    use alloc::boxed::Box;
-
     use super::*;
-    use crate::data::uncompressed::UncompressedBackend;
+    use crate::inode::tests::*;
+    use crate::superblock::uncompressed::*;
     use crate::superblock::tests::*;
+    use core::mem::MaybeUninit;
+    use alloc::boxed::Box;
+    use std::collections::HashMap;
     use std::fs::File;
     use std::os::unix::fs::FileExt;
 
@@ -71,9 +74,13 @@ mod tests {
     #[test]
     fn test_uncompressed_img_filesystem() {
         let file = load_fixture();
-        let filesystem: Box<dyn FileSystem> =
-            Box::new(RawFileSystem::new(UncompressedBackend::new(file)));
-        test_superblock_def(filesystem.as_ref());
-        test_filesystem_ilookup(filesystem.as_ref());
+        let mut filesystem: BufferedFileSystem<SimpleInode, HashMap<Nid, MaybeUninit<SimpleInode>>> =
+            BufferedFileSystem::new(
+                Box::new(RawFileSystem::new(UncompressedBackend::new(file))),
+                HashMap::new(),
+            );
+        test_superblock_def(&mut filesystem);
+        test_filesystem_ilookup(&mut filesystem);
+        test_filesystem_ilookup(&mut filesystem);
     }
 }

@@ -64,9 +64,11 @@ impl From<SuperBlock> for [u8; 128] {
 pub(crate) type SuperBlockBuf = [u8; size_of::<SuperBlock>()];
 pub(crate) const SUPERBLOCK_EMPTY_BUF: SuperBlockBuf = [0; size_of::<SuperBlock>()];
 
-pub(crate) trait FileSystem {
+pub(crate) trait FileSystem<I>
+where
+    I: Inode,
+{
     fn superblock(&self) -> &SuperBlock;
-
     fn backend(&self) -> &dyn Backend;
     fn blknr(&self, pos: Off) -> Blk {
         (pos >> self.superblock().blkszbits) as Blk
@@ -93,21 +95,18 @@ pub(crate) trait FileSystem {
         self.blkpos(sb.meta_blkaddr as u32) + ((nid as Off) << (5 as Off))
     }
 
-    fn read_inode(&self, nid: Nid) -> Inode {
+    fn read_inode_info(&self, nid: Nid) -> InodeInfo {
         let offset = self.iloc(nid);
-        let mut buf: InodeBuf = DEFAULT_INODE_BUF;
+        let mut buf: InodeInfoBuf = DEFAULT_INODE_BUF;
         self.backend().fill(&mut buf, offset).unwrap();
-        Inode {
-            inner: GenericInode::try_from(buf).unwrap(),
-            nid,
-        }
+        InodeInfo::try_from(buf).unwrap()
     }
 
-    fn flatmap(&self, inode: &Inode, offset: Off) -> Map {
-        let layout = inode.inner.format().layout();
-        let nblocks = self.blk_round_up(inode.inner.file_size());
+    fn flatmap(&self, inode: &I, offset: Off) -> Map {
+        let layout = inode.info().format().layout();
+        let nblocks = self.blk_round_up(inode.info().file_size());
 
-        let blkaddr = match inode.inner.spec() {
+        let blkaddr = match inode.info().spec() {
             Spec::Data(blkaddr) => blkaddr,
             _ => unimplemented!(),
         };
@@ -131,15 +130,15 @@ pub(crate) trait FileSystem {
         } else {
             match layout {
                 Layout::FlatInline => {
-                    let len = inode.inner.file_size() - offset;
+                    let len = inode.info().file_size() - offset;
                     Map {
                         index: 0,
                         offset: 0,
                         logical: AddressMap { start: offset, len },
                         physical: AddressMap {
-                            start: self.iloc(inode.nid)
-                                + inode.inner.inode_size()
-                                + inode.inner.xattr_size()
+                            start: self.iloc(*inode.nid())
+                                + inode.info().inode_size()
+                                + inode.info().xattr_size()
                                 + self.blkoff(offset),
                             len,
                         },
@@ -150,7 +149,7 @@ pub(crate) trait FileSystem {
         }
     }
 
-    fn map(&self, inode: &Inode, offset: Off) -> Map {
+    fn map(&self, inode: &I, offset: Off) -> Map {
         self.flatmap(inode, offset)
     }
 
@@ -162,10 +161,10 @@ pub(crate) trait FileSystem {
 
     fn content_iter<'b, 'a: 'b>(
         &'a self,
-        inode: &'b Inode,
+        inode: &'b I,
     ) -> Box<dyn Iterator<Item = Box<dyn Buffer + 'b>> + 'b>;
 
-    fn fill_dentries(&self, inode: &Inode, emitter: &dyn Fn(Dirent)) {
+    fn fill_dentries(&self, inode: &I, emitter: &dyn Fn(Dirent)) {
         for buf in self.content_iter(inode) {
             for dirent in DirCollection::new(buf.content()) {
                 emitter(dirent)
@@ -173,7 +172,7 @@ pub(crate) trait FileSystem {
         }
     }
 
-    fn find_nid(&self, inode: &Inode, name: &str) -> Option<Nid> {
+    fn find_nid(&self, inode: &I, name: &str) -> Option<Nid> {
         for buf in self.content_iter(inode) {
             for dirent in DirCollection::new(buf.content()) {
                 if dirent.dirname() == name.as_bytes() {
@@ -183,27 +182,75 @@ pub(crate) trait FileSystem {
         }
         None
     }
+}
 
-    fn ilookup(&self, name: &str) -> Option<Inode> {
-        let mut nid = self.superblock().root_nid as Nid;
+pub struct BufferedFileSystem<I, C>
+where
+    I: Inode,
+    C: InodeCollection<I = I>,
+{
+    filesystem: Box<dyn FileSystem<I>>,
+    collection: C,
+}
+
+impl<I, C> BufferedFileSystem<I, C>
+where
+    I: Inode,
+    C: InodeCollection<I = I>,
+{
+    fn new(fs: Box<dyn FileSystem<I>>, c: C) -> Self {
+        Self {
+            filesystem: fs,
+            collection: c,
+        }
+    }
+
+    fn read_inode<'a>(
+        filesystem: &'a Box<dyn FileSystem<I>>,
+        collection: &'a mut C,
+        nid: Nid,
+    ) -> &'a mut I {
+        let (inode, is_init) = collection.iget(nid);
+        if !is_init {
+            inode.write(I::new(filesystem.read_inode_info(nid), nid));
+        }
+        unsafe { inode.assume_init_mut() }
+    }
+
+    fn superblock(&self) -> &SuperBlock {
+        self.filesystem.superblock()
+    }
+    fn ilookup<'a>(&'a mut self, name: &str) -> Option<&'a mut I> {
+        let mut nid = self.filesystem.superblock().root_nid as Nid;
         for part in name.split('/') {
             if part.is_empty() {
                 continue;
             }
-            let inode = self.read_inode(nid);
-            nid = self.find_nid(&inode, part)?;
+            let inode = Self::read_inode(&self.filesystem, &mut self.collection, nid);
+            nid = self.filesystem.find_nid(inode, part)?
         }
-        Some(self.read_inode(nid))
+        Some(Self::read_inode(
+            &self.filesystem,
+            &mut self.collection,
+            nid,
+        ))
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     extern crate std;
+
     use super::*;
+    use crate::inode::tests::*;
+    use core::mem::MaybeUninit;
+    use std::collections::HashMap;
     use std::fs::File;
     use std::path::Path;
     pub(crate) const SB_MAGIC: u32 = 0xE0F5E1E2;
+
+    pub(crate) type SimpleBufferedFileSystem =
+        BufferedFileSystem<SimpleInode, HashMap<Nid, MaybeUninit<SimpleInode>>>;
 
     pub(crate) fn load_fixture() -> File {
         let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/sample.img"));
@@ -212,13 +259,13 @@ mod tests {
         file.unwrap()
     }
 
-    pub(crate) fn test_superblock_def(filesystem: &dyn FileSystem) {
+    pub(crate) fn test_superblock_def(filesystem: &mut SimpleBufferedFileSystem) {
         assert_eq!(filesystem.superblock().magic, SB_MAGIC);
     }
 
-    pub(crate) fn test_filesystem_ilookup(filesystem: &dyn FileSystem) {
+    pub(crate) fn test_filesystem_ilookup(filesystem: &mut SimpleBufferedFileSystem) {
         let inode = filesystem.ilookup("/texts/lipsum.txt").unwrap();
-        assert_eq!(inode.nid, 640);
+        assert_eq!(*inode.nid(), 640);
     }
 
     #[test]

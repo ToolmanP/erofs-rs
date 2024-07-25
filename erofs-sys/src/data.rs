@@ -9,7 +9,6 @@ use super::inode::*;
 use super::map::*;
 use super::superblock::FileSystem;
 use super::*;
-use core::marker::PhantomData;
 
 #[derive(Debug)]
 pub(crate) enum SourceError {
@@ -128,38 +127,36 @@ impl<'a> Drop for MemBufferMut<'a> {
     }
 }
 
-pub(crate) struct MapIter<'a, 'b, T, U>
+pub(crate) struct MapIter<'a, 'b, FS, I>
 where
-    T: FileSystem,
-    U: Backend,
+    FS: FileSystem<I>,
+    I: Inode,
 {
-    sbi: &'a T,
-    inode: &'b Inode,
+    sbi: &'a FS,
+    inode: &'b I,
     offset: Off,
     len: Off,
-    _marker: PhantomData<&'a U>,
 }
 
-impl<'a, 'b, T, U> MapIter<'a, 'b, T, U>
+impl<'a, 'b, FS, I> MapIter<'a, 'b, FS, I>
 where
-    T: FileSystem,
-    U: Backend,
+    FS: FileSystem<I>,
+    I: Inode,
 {
-    pub fn new(sbi: &'a T, inode: &'b Inode) -> Self {
+    pub fn new(sbi: &'a FS, inode: &'b I) -> Self {
         Self {
             sbi,
             inode,
             offset: 0,
-            len: inode.inner.file_size(),
-            _marker: Default::default(),
+            len: inode.info().file_size(),
         }
     }
 }
 
-impl<'a, 'b, T, U> Iterator for MapIter<'a, 'b, T, U>
+impl<'a, 'b, FS, I> Iterator for MapIter<'a, 'b, FS, I>
 where
-    T: FileSystem,
-    U: Backend,
+    FS: FileSystem<I>,
+    I: Inode,
 {
     type Item = Map;
     fn next(&mut self) -> Option<Self::Item> {
@@ -173,29 +170,32 @@ where
     }
 }
 
-pub(crate) struct TempBufferIter<'a, 'b, T, U>
+pub(crate) struct TempBufferIter<'a, 'b, FS, B, I>
 where
-    T: FileSystem,
-    U: FileBackend,
+    FS: FileSystem<I>,
+    B: FileBackend,
+    I: Inode,
 {
-    backend: &'a U,
-    map_iter: MapIter<'a, 'b, T, U>,
+    backend: &'a B,
+    map_iter: MapIter<'a, 'b, FS, I>,
 }
 
-impl<'a, 'b, T, U> TempBufferIter<'a, 'b, T, U>
+impl<'a, 'b, FS, B, I> TempBufferIter<'a, 'b, FS, B, I>
 where
-    T: FileSystem,
-    U: FileBackend,
+    FS: FileSystem<I>,
+    B: FileBackend,
+    I: Inode,
 {
-    pub(crate) fn new(backend: &'a U, map_iter: MapIter<'a, 'b, T, U>) -> Self {
+    pub(crate) fn new(backend: &'a B, map_iter: MapIter<'a, 'b, FS, I>) -> Self {
         Self { backend, map_iter }
     }
 }
 
-impl<'a, 'b, T, U> Iterator for TempBufferIter<'a, 'b, T, U>
+impl<'a, 'b, FS, B, I> Iterator for TempBufferIter<'a, 'b, FS, B, I>
 where
-    T: FileSystem,
-    U: FileBackend,
+    FS: FileSystem<I>,
+    B: FileBackend,
+    I: Inode,
 {
     type Item = Box<dyn Buffer + 'a>;
     fn next(&mut self) -> Option<Self::Item> {
@@ -222,29 +222,32 @@ where
     }
 }
 
-pub(crate) struct RefIter<'a, 'b, T, U>
+pub(crate) struct RefIter<'a, 'b, FS, B, I>
 where
-    T: FileSystem,
-    U: MemoryBackend<'a>,
+    FS: FileSystem<I>,
+    B: MemoryBackend<'a>,
+    I: Inode,
 {
-    backend: &'a U,
-    map_iter: MapIter<'a, 'b, T, U>,
+    backend: &'a B,
+    map_iter: MapIter<'a, 'b, FS, I>,
 }
 
-impl<'a, 'b, T, U> RefIter<'a, 'b, T, U>
+impl<'a, 'b, FS, B, I> RefIter<'a, 'b, FS, B, I>
 where
-    T: FileSystem,
-    U: MemoryBackend<'a>,
+    FS: FileSystem<I>,
+    B: MemoryBackend<'a>,
+    I: Inode,
 {
-    pub(crate) fn new(backend: &'a U, map_iter: MapIter<'a, 'b, T, U>) -> Self {
+    pub(crate) fn new(backend: &'a B, map_iter: MapIter<'a, 'b, FS, I>) -> Self {
         Self { backend, map_iter }
     }
 }
 
-impl<'a, 'b, T, U> Iterator for RefIter<'a, 'b, T, U>
+impl<'a, 'b, FS, B, I> Iterator for RefIter<'a, 'b, FS, B, I>
 where
-    T: FileSystem,
-    U: MemoryBackend<'a>,
+    FS: FileSystem<I>,
+    B: MemoryBackend<'a>,
+    I: Inode,
 {
     type Item = Box<dyn Buffer + 'a>;
     fn next(&mut self) -> Option<Self::Item> {
