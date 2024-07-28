@@ -14,9 +14,11 @@ keywords = ["filesystem"]
 
 [dev-dependencies]
 memmap2 = "0.9.4" # For Testing the Memory Backed Filesystem.
-sha2 = "0.10.8"
-hex-literal = "0.4.1"
+sha2 = "0.10.8" # For Inspecting the Hash of the filesystem data.
+hex-literal = "0.4.1" # For Hexadecimal Literals
 
+
+# The following is copyed from the rust-for-linux project Makefile
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 rust_2018_idioms = "deny"
