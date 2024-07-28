@@ -5,7 +5,7 @@ use self::operations::get_xattr_prefixes;
 
 use super::*;
 
-pub struct RawFileSystem<B>
+pub(crate) struct RawFileSystem<B>
 // Only support standard file/device io. Not a continguous region of memory.
 where
     B: FileBackend,
@@ -27,17 +27,17 @@ where
         &self.backend
     }
 
-    fn mapped_iter<'b, 'a: 'b>(&'a self, inode: &'b I) -> Box<dyn BufferMapIter + 'b> {
+    fn mapped_iter<'b, 'a: 'b>(&'a self, inode: &'b I) -> Box<dyn BufferMapIter<'a> + 'b> {
         Box::new(TempBufferMapIter::new(
             &self.backend,
             MapIter::new(self, inode),
         ))
     }
-    fn continous_iter<'b, 'a: 'b>(
+    fn continous_iter<'a>(
         &'a self,
         offset: Off,
         len: Off,
-    ) -> Box<dyn ContinousBufferIter + 'b> {
+    ) -> Box<dyn ContinousBufferIter<'a> + 'a> {
         Box::new(ContinuousTempBufferIter::new(&self.backend, offset, len))
     }
     fn xattr_prefixes(&self) -> &Vec<xattrs::Prefix> {

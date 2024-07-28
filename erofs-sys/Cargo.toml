@@ -16,3 +16,26 @@ keywords = ["filesystem"]
 memmap2 = "0.9.4" # For Testing the Memory Backed Filesystem.
 sha2 = "0.10.8"
 hex-literal = "0.4.1"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+rust_2018_idioms = "deny"
+unreachable_pub = "deny"
+non_ascii_idents = "deny"
+missing_docs = "deny"
+
+[lints.rustdoc]
+missing_crate_level_docs = "warn"
+
+[lints.clippy]
+correctness = "deny"
+style = "deny"
+suspicious = "deny"
+complexity = "deny"
+perf = "deny"
+let_unit_value = "deny"
+mut_mut = "deny"
+needless_bitwise_bool = "deny"
+needless_continue = "deny"
+no_mangle_with_rust_abi = "deny"
+dbg_macro = "deny"

@@ -9,7 +9,7 @@ use super::*;
 // Note that we do not want the lifetime to infect the MemFileSystem which may have a impact on
 // the content iter below. Just use HRTB to dodge the borrow checker.
 
-pub struct MemFileSystem<T>
+pub(crate) struct MemFileSystem<T>
 where
     T: for<'a> MemoryBackend<'a>,
 {
@@ -30,14 +30,14 @@ where
         &self.backend
     }
 
-    fn mapped_iter<'b, 'a: 'b>(&'a self, inode: &'b I) -> Box<dyn BufferMapIter + 'b> {
+    fn mapped_iter<'b, 'a: 'b>(&'a self, inode: &'b I) -> Box<dyn BufferMapIter<'a> + 'b> {
         Box::new(RefMapIter::new(&self.backend, MapIter::new(self, inode)))
     }
-    fn continous_iter<'b, 'a: 'b>(
+    fn continous_iter<'a>(
         &'a self,
         offset: Off,
         len: Off,
-    ) -> Box<dyn ContinousBufferIter + 'b> {
+    ) -> Box<dyn ContinousBufferIter<'a> + 'a> {
         Box::new(ContinuousRefIter::new(&self.backend, offset, len))
     }
     fn xattr_prefixes(&self) -> &Vec<xattrs::Prefix> {
@@ -49,7 +49,7 @@ impl<T> MemFileSystem<T>
 where
     T: for<'a> MemoryBackend<'a>,
 {
-    pub fn new(backend: T) -> Self {
+    pub(crate) fn new(backend: T) -> Self {
         let mut buf = SUPERBLOCK_EMPTY_BUF;
         backend.fill(&mut buf, EROFS_SUPER_OFFSET).unwrap();
         let sb: SuperBlock = buf.into();

@@ -3,15 +3,15 @@
 
 #[repr(C, packed)]
 pub(crate) struct DirentDesc {
-    pub nid: u64,
-    pub nameoff: u16,
-    pub file_type: u8,
-    pub reserved: u8,
+    pub(crate) nid: u64,
+    pub(crate) nameoff: u16,
+    pub(crate) file_type: u8,
+    pub(crate) reserved: u8,
 }
 
 pub(crate) struct Dirent<'a> {
-    pub desc: &'a DirentDesc,
-    pub name: &'a [u8],
+    pub(crate) desc: &'a DirentDesc,
+    pub(crate) name: &'a [u8],
 }
 
 pub(crate) struct DirCollection<'a> {

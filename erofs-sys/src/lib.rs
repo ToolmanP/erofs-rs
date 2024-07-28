@@ -1,6 +1,11 @@
 #![no_std]
+
+#![allow(dead_code)]
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-only
+
+//! A pure Rust implementation of the EROFS filesystem.
+//! Technical Details are documented in the [EROFS Documentation](https://erofs.docs.kernel.org/en/latest/)
 
 pub(crate) const EROFS_BLOCK_SZ: u64 = 4096;
 pub(crate) const EROFS_EMPTY_BLOCK: Block = [0; EROFS_BLOCK_SZ as usize];
@@ -28,9 +33,13 @@ impl From<u64> for PageAddress {
 // to use trait object to export Filesystem pointer. The alloc crate here is necessary.
 extern crate alloc;
 
+/// Erofs Operates on the block/page size of 4096 we respect that.
 pub type Block = [u8; EROFS_BLOCK_SZ as usize];
+/// Erofs requires block index to a 32 bit unsigned integer.
 pub type Blk = u32;
+/// Erofs requires normal offset to be a 64bit unsigned integer.
 pub type Off = u64;
+/// Erofs requires inode nid to be a 64bit unsigned integer.
 pub type Nid = u64;
 
 mod compression;
@@ -42,6 +51,7 @@ mod operations;
 mod superblock;
 mod xattrs;
 
+/// Helper macro to round up or down a number.
 #[macro_export]
 macro_rules! round {
     (UP, $x: expr, $y: expr) => {

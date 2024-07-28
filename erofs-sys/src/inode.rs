@@ -6,10 +6,16 @@ use alloc::boxed::Box;
 use super::*;
 use core::mem::{size_of, MaybeUninit};
 
-#[repr(C)]
+/// Represents the compact bitfield of the Erofs Inode format.
+#[repr(transparent)]
 #[derive(Clone, Copy)]
 pub(crate) struct Format(u16);
 
+
+
+/// The Version of the Inode which represents whether this inode is extended or compact.
+/// Extended inodes have more infos about nlinks + mtime.
+/// Documennted 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(crate) enum Version {
@@ -18,7 +24,9 @@ pub(crate) enum Version {
     Unknown,
 }
 
-#[repr(C)]
+/// Represents the data layout backed by the Inode.
+/// As Documented in https://erofs.docs.kernel.org/en/latest/core_ondisk.html#inode-data-layouts
+#[repr(C)] 
 #[derive(Clone, Copy)]
 pub(crate) enum Layout {
     FlatPlain,
@@ -30,6 +38,7 @@ pub(crate) enum Layout {
 }
 
 #[repr(C)]
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Type {
     Regular,
@@ -37,14 +46,15 @@ pub(crate) enum Type {
     Link,
     Character,
     Block,
-    FIFO,
+    Fifo,
     Socket,
     Unknown,
 }
 
+/// This is format extracted from the 
 impl Format {
     pub(crate) fn version(&self) -> Version {
-        match (self.0 >> 0) & ((1 << 1) - 1) {
+        match (self.0) & ((1 << 1) - 1) {
             0 => Version::Compat,
             1 => Version::Extended,
             _ => Version::Unknown,
@@ -192,7 +202,7 @@ impl InodeInfo {
             0o40000 => Type::Directory, // Directory
             0o100000 => Type::Regular,  // Regular File
             0o120000 => Type::Link,     // Symbolic Link
-            0o10000 => Type::FIFO,      // FIFO
+            0o10000 => Type::Fifo,      // FIFO
             0o140000 => Type::Socket,   // Socket
             0o60000 => Type::Block,     // Block
             0o20000 => Type::Character, // Character
@@ -204,7 +214,7 @@ impl InodeInfo {
 pub(crate) type InodeInfoBuf = [u8; size_of::<ExtendedInodeInfo>()];
 pub(crate) const DEFAULT_INODE_BUF: InodeInfoBuf = [0; size_of::<ExtendedInodeInfo>()];
 
-pub trait Inode: Sized {
+pub(crate) trait Inode: Sized {
     fn new(info: InodeInfo, nid: Nid, xattrs_header: xattrs::MemEntryIndexHeader) -> Self;
     fn info(&self) -> &InodeInfo;
     fn xattrs_header(&self) -> &xattrs::MemEntryIndexHeader;
@@ -253,7 +263,7 @@ impl TryFrom<InodeInfoBuf> for InodeInfo {
     }
 }
 
-pub trait InodeCollection {
+pub(crate) trait InodeCollection {
     type I: Inode + Sized;
 
     // Design Pattern:

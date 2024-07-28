@@ -1,7 +1,7 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-only
 
-pub mod uncompressed;
+pub(crate) mod uncompressed;
 
 use self::dir::DirCollection;
 use alloc::boxed::Box;
@@ -63,7 +63,7 @@ pub(crate) struct TempBuffer {
 
 pub(crate) trait Buffer {
     fn content(&self) -> &[u8];
-    fn iter_dir(&self) -> DirCollection {
+    fn iter_dir(&self) -> DirCollection<'_> {
         DirCollection::new(self.content())
     }
 }
@@ -188,7 +188,7 @@ where
     FS: FileSystem<I>,
     I: Inode,
 {
-    pub fn new(sbi: &'a FS, inode: &'b I) -> Self {
+    pub(crate) fn new(sbi: &'a FS, inode: &'b I) -> Self {
         Self {
             sbi,
             inode,

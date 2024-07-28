@@ -19,7 +19,7 @@ impl From<[u8; 12]> for DiskEntryIndexHeader {
     }
 }
 
-pub const XATTRS_HEADER_SIZE: u64 = core::mem::size_of::<DiskEntryIndexHeader>() as u64;
+pub(crate) const XATTRS_HEADER_SIZE: u64 = core::mem::size_of::<DiskEntryIndexHeader>() as u64;
 
 #[derive(Clone)]
 pub(crate) struct MemEntryIndexHeader {
@@ -43,7 +43,7 @@ impl From<[u8; 4]> for EntryHeader {
 
 #[derive(Clone)]
 #[repr(transparent)]
-pub(crate) struct Prefix(pub Vec<u8>);
+pub(crate) struct Prefix(pub(crate) Vec<u8>);
 
 impl Prefix {
     fn index(&self) -> u8 {
@@ -58,13 +58,13 @@ pub(crate) trait XAttrsEntryProvider {
     fn get_entry_header(&mut self) -> EntryHeader;
     fn get_xattr_name(
         &mut self,
-        pfs: &Vec<Prefix>,
+        pfs: &[Prefix],
         header: &EntryHeader,
         buffer: &mut [u8],
     ) -> usize;
     fn get_xattr_value(
         &mut self,
-        pfs: &Vec<Prefix>,
+        pfs: &[Prefix],
         header: &EntryHeader,
         name: &[u8],
         index: u32,
@@ -76,11 +76,14 @@ pub(crate) trait XAttrsEntryProvider {
 pub(crate) const EROFS_XATTR_LONG_PREFIX: u8 = 0x80;
 pub(crate) const EROFS_XATTR_LONG_MASK: u8 = 0x7f;
 
+
+#[allow(unused_macros)]
 macro_rules! static_cstr {
     ($l:expr) => {
         unsafe { ::core::ffi::CStr::from_bytes_with_nul_unchecked(concat!($l, "\0").as_bytes()) }
     };
 }
+
 pub(crate) const EROFS_XATTRS_PREFIXS: [(&str, usize); 7] = [
     ("", 0),
     ("user.", 5),
@@ -100,7 +103,7 @@ impl<'a> XAttrsEntryProvider for SkippableContinousIter<'a> {
 
     fn get_xattr_name(
         &mut self,
-        pfs: &Vec<Prefix>,
+        pfs: &[Prefix],
         header: &EntryHeader,
         buffer: &mut [u8],
     ) -> usize {
@@ -123,7 +126,7 @@ impl<'a> XAttrsEntryProvider for SkippableContinousIter<'a> {
     }
     fn get_xattr_value(
         &mut self,
-        pfs: &Vec<Prefix>,
+        pfs: &[Prefix],
         header: &EntryHeader,
         name: &[u8],
         index: u32,
@@ -172,4 +175,4 @@ impl<'a> XAttrsEntryProvider for SkippableContinousIter<'a> {
 }
 
 #[cfg(test)]
-pub mod tests {}
+pub(crate) mod tests {}

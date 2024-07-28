@@ -16,8 +16,8 @@ use super::*;
 
 use core::mem::size_of;
 
-pub mod file;
-pub mod mem;
+pub(crate) mod file;
+pub(crate) mod mem;
 
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]
@@ -99,7 +99,7 @@ where
 
     fn iloc(&self, nid: Nid) -> Off {
         let sb = &self.superblock();
-        self.blkpos(sb.meta_blkaddr as u32) + ((nid as Off) << (5 as Off))
+        self.blkpos(sb.meta_blkaddr) + ((nid as Off) << (5 as Off))
     }
 
     fn read_inode_info(&self, nid: Nid) -> InodeInfo {
@@ -218,15 +218,12 @@ where
     // If we want to have trait object that can be exported to c_void
     // Leave it as it is for tradeoffs
 
-    fn mapped_iter<'b, 'a: 'b>(&'a self, inode: &'b I) -> Box<dyn BufferMapIter + 'b>;
+    fn mapped_iter<'b, 'a: 'b>(&'a self, inode: &'b I) -> Box<dyn BufferMapIter<'a> + 'b>;
 
-    fn continous_iter<'b, 'a: 'b>(
-        &'a self,
-        offset: Off,
-        len: Off,
-    ) -> Box<dyn ContinousBufferIter + 'b>;
+    fn continous_iter<'a>(&'a self, offset: Off, len: Off)
+        -> Box<dyn ContinousBufferIter<'a> + 'a>;
 
-    fn fill_dentries(&self, inode: &I, emitter: &dyn Fn(Dirent)) {
+    fn fill_dentries(&self, inode: &I, emitter: &dyn Fn(Dirent<'_>)) {
         for buf in self.mapped_iter(inode) {
             for dirent in buf.iter_dir() {
                 emitter(dirent)
@@ -320,7 +317,7 @@ where
     }
 }
 
-pub struct SuperblockInfo<I, C>
+pub(crate) struct SuperblockInfo<I, C>
 where
     I: Inode,
     C: InodeCollection<I = I>,

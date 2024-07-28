@@ -17,7 +17,7 @@ where
     fn fill(&self, data: &mut [u8], offset: Off) -> BackendResult<u64> {
         self.source
             .fill(data, offset)
-            .map_or_else(|_| Err(BackendError::Dummy), |x| Ok(x))
+            .map_or_else(|_| Err(BackendError::Dummy), Ok)
     }
     fn get_temp_buffer(&self, offset: Off) -> BackendResult<TempBuffer> {
         match self.source.get_temp_buffer(offset) {

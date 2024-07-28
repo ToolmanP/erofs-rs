@@ -59,6 +59,6 @@ pub(crate) fn get_xattr_prefixes(sb: &SuperBlock, backend: &dyn Backend) -> Vec<
         (sb.xattr_prefix_start << 2) as Off,
         sb.xattr_prefix_count as usize,
     )
-    .map(|buf| xattrs::Prefix(buf.into()))
+    .map(xattrs::Prefix)
     .collect()
 }
