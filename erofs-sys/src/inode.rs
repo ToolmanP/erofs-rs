@@ -4,10 +4,7 @@
 use alloc::boxed::Box;
 
 use super::*;
-use core::{
-    mem::{size_of, MaybeUninit},
-    ptr::NonNull,
-};
+use core::mem::{size_of, MaybeUninit};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -156,6 +153,13 @@ impl InodeInfo {
         }
     }
 
+    pub(crate) fn xattr_count(&self) -> u16 {
+        match self {
+            Self::Extended(extended) => extended.i_xattr_icount,
+            Self::Compact(compact) => compact.i_xattr_icount,
+        }
+    }
+
     pub(crate) fn spec(&self) -> Spec {
         let mode = match self {
             Self::Extended(extended) => extended.i_mode,
@@ -201,8 +205,9 @@ pub(crate) type InodeInfoBuf = [u8; size_of::<ExtendedInodeInfo>()];
 pub(crate) const DEFAULT_INODE_BUF: InodeInfoBuf = [0; size_of::<ExtendedInodeInfo>()];
 
 pub trait Inode: Sized {
-    fn new(info: InodeInfo, nid: Nid) -> Self;
+    fn new(info: InodeInfo, nid: Nid, xattrs_header: xattrs::MemEntryIndexHeader) -> Self;
     fn info(&self) -> &InodeInfo;
+    fn xattrs_header(&self) -> &xattrs::MemEntryIndexHeader;
     fn nid(&self) -> &Nid;
 }
 
@@ -251,12 +256,13 @@ impl TryFrom<InodeInfoBuf> for InodeInfo {
 pub trait InodeCollection {
     type I: Inode + Sized;
 
+    // Design Pattern:
     // In ilocked_get5 the inode will go through the late init phase;
     // we mimic this correspondingly;
-
     fn new_uninit_raw() -> Box<MaybeUninit<Self::I>> {
         Box::new(MaybeUninit::<Self::I>::uninit())
     }
+
     fn iget(&mut self, nid: Nid) -> (&mut MaybeUninit<Self::I>, bool);
 }
 
@@ -265,6 +271,7 @@ pub(crate) mod tests {
 
     extern crate std;
     use super::*;
+    use crate::xattrs;
     use std::collections::{hash_map::Entry, HashMap};
 
     #[test]
@@ -275,12 +282,20 @@ pub(crate) mod tests {
 
     pub(crate) struct SimpleInode {
         info: InodeInfo,
+        xattr_header: xattrs::MemEntryIndexHeader,
         nid: Nid,
     }
 
     impl Inode for SimpleInode {
-        fn new(info: InodeInfo, nid: Nid) -> Self {
-            Self { info, nid }
+        fn new(info: InodeInfo, nid: Nid, xattr_header: xattrs::MemEntryIndexHeader) -> Self {
+            Self {
+                info,
+                xattr_header,
+                nid,
+            }
+        }
+        fn xattrs_header(&self) -> &xattrs::MemEntryIndexHeader {
+            &self.xattr_header
         }
         fn nid(&self) -> &Nid {
             &self.nid

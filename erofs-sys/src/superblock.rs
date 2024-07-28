@@ -2,12 +2,18 @@
 // SPDX-License-Identifier: MIT or GPL-2.0-only
 
 use alloc::boxed::Box;
+use alloc::vec::Vec;
+
+use crate::xattrs::DiskEntryIndexHeader;
+use crate::xattrs::XAttrsEntryProvider;
 
 use super::data::*;
 use super::dir::*;
 use super::inode::*;
 use super::map::*;
+use super::xattrs;
 use super::*;
+
 use core::mem::size_of;
 
 pub mod file;
@@ -26,11 +32,12 @@ pub struct SuperBlock {
     pub(crate) build_time: i64,
     pub(crate) build_time_nsec: i32,
     pub(crate) blocks: i32,
-    pub(crate) meta_blkaddr: i32,
+    pub(crate) meta_blkaddr: u32,
+    pub(crate) xattr_blkaddr: u32,
     pub(crate) uuid: [u8; 16],
     pub(crate) volume_name: [u8; 16],
     pub(crate) feature_incompat: i32,
-    pub(crate) compression: i32,
+    pub(crate) compression: i16,
     pub(crate) extra_devices: i16,
     pub(crate) devt_slotoff: i16,
     pub(crate) dirblkbits: u8,
@@ -102,6 +109,58 @@ where
         InodeInfo::try_from(buf).unwrap()
     }
 
+    fn xattr_prefixes(&self) -> &Vec<xattrs::Prefix>;
+
+    // Currently we eagerly initialized all xattrs;
+    //
+    fn read_inode_xattrs_index(&self, nid: Nid) -> xattrs::MemEntryIndexHeader {
+        let offset = self.iloc(nid);
+
+        let len = EROFS_BLOCK_SZ - self.blkoff(offset);
+        let mut buf = EROFS_EMPTY_BLOCK;
+        let mut indexes: Vec<u32> = Vec::new();
+
+        let rlen = self
+            .backend()
+            .fill(&mut buf[0..len as usize], offset)
+            .unwrap();
+
+        let header: xattrs::DiskEntryIndexHeader =
+            unsafe { *(buf.as_ptr() as *const xattrs::DiskEntryIndexHeader) };
+        let inline_count =
+            (((rlen - xattrs::XATTRS_HEADER_SIZE) >> 2) as usize).min(header.shared_count as usize);
+        let outbound_count = header.shared_count as usize - inline_count;
+
+        indexes.extend_from_slice(unsafe {
+            core::slice::from_raw_parts(
+                (buf[xattrs::XATTRS_HEADER_SIZE as usize..len as usize])
+                    .as_ptr()
+                    .cast(),
+                inline_count,
+            )
+        });
+
+        if outbound_count == 0 {
+            xattrs::MemEntryIndexHeader {
+                name_filter: header.name_filter,
+                shared_indexes: indexes,
+            }
+        } else {
+            for block in self.continous_iter(
+                round!(UP, offset, EROFS_BLOCK_SZ),
+                (outbound_count << 2) as Off,
+            ) {
+                let data = block.content();
+                indexes.extend_from_slice(unsafe {
+                    core::slice::from_raw_parts(data.as_ptr().cast(), data.len() >> 2)
+                });
+            }
+            xattrs::MemEntryIndexHeader {
+                name_filter: header.name_filter,
+                shared_indexes: indexes,
+            }
+        }
+    }
     fn flatmap(&self, inode: &I, offset: Off) -> Map {
         let layout = inode.info().format().layout();
         let nblocks = self.blk_round_up(inode.info().file_size());
@@ -159,28 +218,105 @@ where
     // If we want to have trait object that can be exported to c_void
     // Leave it as it is for tradeoffs
 
-    fn content_iter<'b, 'a: 'b>(
+    fn mapped_iter<'b, 'a: 'b>(&'a self, inode: &'b I) -> Box<dyn BufferMapIter + 'b>;
+
+    fn continous_iter<'b, 'a: 'b>(
         &'a self,
-        inode: &'b I,
-    ) -> Box<dyn Iterator<Item = Box<dyn Buffer + 'b>> + 'b>;
+        offset: Off,
+        len: Off,
+    ) -> Box<dyn ContinousBufferIter + 'b>;
 
     fn fill_dentries(&self, inode: &I, emitter: &dyn Fn(Dirent)) {
-        for buf in self.content_iter(inode) {
-            for dirent in DirCollection::new(buf.content()) {
+        for buf in self.mapped_iter(inode) {
+            for dirent in buf.iter_dir() {
                 emitter(dirent)
             }
         }
     }
 
     fn find_nid(&self, inode: &I, name: &str) -> Option<Nid> {
-        for buf in self.content_iter(inode) {
-            for dirent in DirCollection::new(buf.content()) {
+        for buf in self.mapped_iter(inode) {
+            for dirent in buf.iter_dir() {
                 if dirent.dirname() == name.as_bytes() {
                     return Some(dirent.desc.nid);
                 }
             }
         }
         None
+    }
+
+    fn get_xattr(&self, inode: &I, index: u32, name: &[u8], buffer: &mut [u8]) -> bool {
+        let count = inode.info().xattr_count();
+        let shared_count = inode.xattrs_header().shared_indexes.len();
+        let inline_count = count as usize - shared_count;
+
+        let inline_offset = self.iloc(*inode.nid())
+            + inode.info().inode_size() as Off
+            + size_of::<DiskEntryIndexHeader>() as Off
+            + shared_count as Off * 4;
+
+        {
+            let mut inline_provider =
+                SkippableContinousIter::new(self.continous_iter(inline_offset, u64::MAX));
+            for _ in 0..inline_count {
+                let header = inline_provider.get_entry_header();
+                if inline_provider.get_xattr_value(
+                    self.xattr_prefixes(),
+                    &header,
+                    name,
+                    index,
+                    buffer,
+                ) {
+                    return true;
+                }
+            }
+        }
+
+        for index in inode.xattrs_header().shared_indexes.iter() {
+            let mut provider = SkippableContinousIter::new(self.continous_iter(
+                self.blkpos(self.superblock().xattr_blkaddr) + (*index as Off) * 4,
+                u64::MAX,
+            ));
+            let header = provider.get_entry_header();
+            if provider.get_xattr_value(self.xattr_prefixes(), &header, name, *index, buffer) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn list_xattrs(&self, inode: &I, buffer: &mut [u8]) {
+        let count = inode.info().xattr_count();
+        let shared_count = inode.xattrs_header().shared_indexes.len();
+        let inline_count = count as usize - shared_count;
+        let inline_offset = self.iloc(*inode.nid())
+            + inode.info().inode_size() as Off
+            + size_of::<DiskEntryIndexHeader>() as Off
+            + shared_count as Off * 4;
+
+        let mut offset = 0;
+        {
+            let mut inline_provider =
+                SkippableContinousIter::new(self.continous_iter(inline_offset, u64::MAX));
+            for _ in 0..inline_count {
+                let header = inline_provider.get_entry_header();
+                offset += inline_provider.get_xattr_name(
+                    self.xattr_prefixes(),
+                    &header,
+                    &mut buffer[offset..],
+                );
+            }
+        }
+
+        for index in inode.xattrs_header().shared_indexes.iter() {
+            let mut provider = SkippableContinousIter::new(self.continous_iter(
+                self.blkpos(self.superblock().xattr_blkaddr) + (*index as Off) * 4,
+                u64::MAX,
+            ));
+            let header = provider.get_entry_header();
+            offset +=
+                provider.get_xattr_name(self.xattr_prefixes(), &header, &mut buffer[offset..]);
+        }
     }
 }
 
@@ -213,7 +349,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::inode::tests::*;
     use crate::operations::*;
-    use alloc::vec::Vec;
     use core::mem::MaybeUninit;
     use hex_literal::hex;
     use sha2::{Digest, Sha512};
@@ -248,12 +383,10 @@ pub(crate) mod tests {
         assert_eq!(inode.info().inode_type(), SAMPLE_TYPE);
         assert_eq!(inode.info().file_size(), SAMPLE_FILE_SIZE);
 
-        let mut bytes: Vec<u8> = Vec::new();
-        for block in sbi.filesystem.content_iter(inode) {
-            bytes.extend_from_slice(block.content());
-        }
         let mut hasher = Sha512::new();
-        hasher.update(&bytes);
+        for block in sbi.filesystem.mapped_iter(inode) {
+            hasher.update(block.content());
+        }
         let result = hasher.finalize();
         assert_eq!(result[..], SAMPLE_HEX);
     }

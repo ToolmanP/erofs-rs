@@ -1,10 +1,13 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-only
 
-use crate::inode::Inode;
-use crate::inode::InodeCollection;
+use alloc::vec::Vec;
+
+use crate::data::*;
+use crate::inode::*;
 use crate::superblock::*;
-use crate::Nid;
+use crate::xattrs;
+use crate::*;
 
 // Because of the brain dead features of borrow-checker, it cannot statically analyze which part of the struct is exclusively borrowed.
 // Refactor out the real file operations, so that we can make sure things will get compiled.
@@ -20,7 +23,11 @@ where
 {
     let (inode, is_init) = collection.iget(nid);
     if !is_init {
-        inode.write(I::new(filesystem.read_inode_info(nid), nid));
+        inode.write(I::new(
+            filesystem.read_inode_info(nid),
+            nid,
+            filesystem.read_inode_xattrs_index(nid),
+        ));
     }
     unsafe { inode.assume_init_mut() }
 }
@@ -44,4 +51,14 @@ where
         nid = filesystem.find_nid(inode, part)?
     }
     Some(read_inode(filesystem, collection, nid))
+}
+
+pub(crate) fn get_xattr_prefixes(sb: &SuperBlock, backend: &dyn Backend) -> Vec<xattrs::Prefix> {
+    MetadataBufferIter::new(
+        backend,
+        (sb.xattr_prefix_start << 2) as Off,
+        sb.xattr_prefix_count as usize,
+    )
+    .map(|buf| xattrs::Prefix(buf.into()))
+    .collect()
 }
