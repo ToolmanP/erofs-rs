@@ -1,6 +1,8 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-only
 
+use self::operations::get_xattr_prefixes;
+
 use super::*;
 
 // Memory Mapped Device/File so we need to have some external lifetime on the backend trait.
@@ -13,6 +15,7 @@ where
 {
     backend: T,
     sb: SuperBlock,
+    prefixes: Vec<xattrs::Prefix>,
 }
 
 impl<I, T> FileSystem<I> for MemFileSystem<T>
@@ -27,11 +30,18 @@ where
         &self.backend
     }
 
-    fn content_iter<'b, 'a: 'b>(
+    fn mapped_iter<'b, 'a: 'b>(&'a self, inode: &'b I) -> Box<dyn BufferMapIter + 'b> {
+        Box::new(RefMapIter::new(&self.backend, MapIter::new(self, inode)))
+    }
+    fn continous_iter<'b, 'a: 'b>(
         &'a self,
-        inode: &'b I,
-    ) -> Box<dyn Iterator<Item = Box<dyn Buffer + 'b>> + 'b> {
-        Box::new(RefIter::new(&self.backend, MapIter::new(self, inode)))
+        offset: Off,
+        len: Off,
+    ) -> Box<dyn ContinousBufferIter + 'b> {
+        Box::new(ContinuousRefIter::new(&self.backend, offset, len))
+    }
+    fn xattr_prefixes(&self) -> &Vec<xattrs::Prefix> {
+        &self.prefixes
     }
 }
 
@@ -42,9 +52,12 @@ where
     pub fn new(backend: T) -> Self {
         let mut buf = SUPERBLOCK_EMPTY_BUF;
         backend.fill(&mut buf, EROFS_SUPER_OFFSET).unwrap();
+        let sb: SuperBlock = buf.into();
+        let prefixes = get_xattr_prefixes(&sb, &backend);
         Self {
             backend,
-            sb: buf.into(),
+            sb,
+            prefixes,
         }
     }
 }
@@ -53,11 +66,11 @@ where
 mod tests {
     extern crate std;
     use super::*;
-    use crate::data::MemBuffer;
+    use crate::data::RefBuffer;
     use crate::inode::tests::*;
     use crate::superblock::tests::*;
     use crate::superblock::uncompressed::*;
-    use crate::superblock::MemorySource;
+    use crate::superblock::PageSource;
     use crate::Off;
     use core::mem::MaybeUninit;
     use memmap2::MmapMut;
@@ -65,29 +78,40 @@ mod tests {
 
     // Impl MmapMut to simulate a in-memory image/filesystem
     impl Source for MmapMut {
-        fn fill(&self, data: &mut [u8], offset: Off) -> SourceResult<()> {
+        fn fill(&self, data: &mut [u8], offset: Off) -> SourceResult<u64> {
             self.as_buf(offset, data.len() as u64).map(|buf| {
                 data.clone_from_slice(buf.content());
+                buf.content().len() as u64
             })
         }
     }
 
-    impl<'a> MemorySource<'a> for MmapMut {
-        fn as_buf(&'a self, offset: crate::Off, len: crate::Off) -> SourceResult<MemBuffer<'a>> {
-            if offset + len >= self.len() as u64 {
-                Err(SourceError::Dummy)
+    impl<'a> PageSource<'a> for MmapMut {
+        fn as_buf(&'a self, offset: crate::Off, len: crate::Off) -> SourceResult<RefBuffer<'a>> {
+            let pa = PageAddress::from(offset);
+            if pa.pg_off + len > EROFS_BLOCK_SZ {
+                Err(SourceError::OutBound)
             } else {
-                Ok(MemBuffer::new(
-                    &self[offset as usize..(offset + len) as usize],
-                ))
+                let rlen = len.min(self.len() as u64 - offset);
+                let buf =
+                    &self[(pa.page as usize)..self.len().min((pa.page + EROFS_BLOCK_SZ) as usize)];
+                Ok(RefBuffer::new(buf, pa.pg_off as usize, rlen as usize))
             }
         }
-        fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> SourceResult<MemBufferMut<'a>> {
-            if offset + len >= self.len() as u64 {
-                Err(SourceError::Dummy)
+
+        fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> SourceResult<RefBufferMut<'a>> {
+            let pa = PageAddress::from(offset);
+            let maxsize = self.len();
+            if pa.pg_off + len > EROFS_BLOCK_SZ {
+                Err(SourceError::OutBound)
             } else {
-                Ok(MemBufferMut::new(
-                    &mut self[offset as usize..(offset + len) as usize],
+                let rlen = len.min(self.len() as u64 - offset);
+                let buf =
+                    &mut self[(pa.page as usize)..maxsize.min((pa.page + EROFS_BLOCK_SZ) as usize)];
+                Ok(RefBufferMut::new(
+                    buf,
+                    pa.pg_off as usize,
+                    rlen as usize,
                     |_| {},
                 ))
             }

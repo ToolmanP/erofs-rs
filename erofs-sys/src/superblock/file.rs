@@ -1,6 +1,8 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-only
 
+use self::operations::get_xattr_prefixes;
+
 use super::*;
 
 pub struct RawFileSystem<B>
@@ -9,6 +11,7 @@ where
     B: FileBackend,
 {
     backend: B,
+    prefixes: Vec<xattrs::Prefix>,
     sb: SuperBlock,
 }
 
@@ -23,14 +26,22 @@ where
     fn backend(&self) -> &dyn Backend {
         &self.backend
     }
-    fn content_iter<'b, 'a: 'b>(
-        &'a self,
-        inode: &'b I,
-    ) -> Box<dyn Iterator<Item = Box<dyn Buffer + 'b>> + 'b> {
-        Box::new(TempBufferIter::new(
+
+    fn mapped_iter<'b, 'a: 'b>(&'a self, inode: &'b I) -> Box<dyn BufferMapIter + 'b> {
+        Box::new(TempBufferMapIter::new(
             &self.backend,
             MapIter::new(self, inode),
         ))
+    }
+    fn continous_iter<'b, 'a: 'b>(
+        &'a self,
+        offset: Off,
+        len: Off,
+    ) -> Box<dyn ContinousBufferIter + 'b> {
+        Box::new(ContinuousTempBufferIter::new(&self.backend, offset, len))
+    }
+    fn xattr_prefixes(&self) -> &Vec<xattrs::Prefix> {
+        &self.prefixes
     }
 }
 
@@ -41,9 +52,12 @@ where
     pub(crate) fn new(backend: T) -> Self {
         let mut buf = SUPERBLOCK_EMPTY_BUF;
         backend.fill(&mut buf, EROFS_SUPER_OFFSET).unwrap();
+        let sb: SuperBlock = buf.into();
+        let prefixes = get_xattr_prefixes(&sb, &backend);
         Self {
             backend,
-            sb: buf.into(),
+            sb,
+            prefixes,
         }
     }
 }
@@ -63,9 +77,9 @@ mod tests {
     use std::os::unix::fs::FileExt;
 
     impl Source for File {
-        fn fill(&self, data: &mut [u8], offset: Off) -> SourceResult<()> {
-            self.read_exact_at(data, offset)
-                .map_err(|_| SourceError::Dummy)
+        fn fill(&self, data: &mut [u8], offset: Off) -> SourceResult<u64> {
+            self.read_at(data, offset)
+                .map_or(Err(SourceError::Dummy), |size| Ok(size as u64))
         }
     }
 
@@ -80,6 +94,6 @@ mod tests {
                 HashMap::new(),
             );
         test_superblock_def(&mut filesystem);
-        let inode = test_filesystem_ilookup(&mut filesystem);
+        test_filesystem_ilookup(&mut filesystem);
     }
 }
