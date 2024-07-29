@@ -3,11 +3,12 @@
 
 use alloc::vec::Vec;
 
-use crate::data::*;
-use crate::inode::*;
-use crate::superblock::*;
-use crate::xattrs;
-use crate::*;
+use super::alloc_helper::*;
+use super::data::*;
+use super::inode::*;
+use super::superblock::*;
+use super::xattrs;
+use super::*;
 
 // Because of the brain dead features of borrow-checker, it cannot statically analyze which part of the struct is exclusively borrowed.
 // Refactor out the real file operations, so that we can make sure things will get compiled.
@@ -54,11 +55,13 @@ where
 }
 
 pub(crate) fn get_xattr_prefixes(sb: &SuperBlock, backend: &dyn Backend) -> Vec<xattrs::Prefix> {
-    MetadataBufferIter::new(
+    let mut result: Vec<xattrs::Prefix> = Vec::new();
+    for data in MetadataBufferIter::new(
         backend,
         (sb.xattr_prefix_start << 2) as Off,
         sb.xattr_prefix_count as usize,
-    )
-    .map(xattrs::Prefix)
-    .collect()
+    ) {
+        push_vec(&mut result, xattrs::Prefix(data));
+    }
+    result
 }

@@ -1,8 +1,12 @@
 // Copyright 2024 Google LLC
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(CONFIG_FS_EROFS)]
+use kernel::prelude::*;
+
 use crate::data::*;
 use crate::*;
+
 use alloc::vec::Vec;
 
 #[derive(Clone, Copy)]
@@ -21,7 +25,6 @@ impl From<[u8; 12]> for DiskEntryIndexHeader {
 
 pub(crate) const XATTRS_HEADER_SIZE: u64 = core::mem::size_of::<DiskEntryIndexHeader>() as u64;
 
-#[derive(Clone)]
 pub(crate) struct MemEntryIndexHeader {
     pub(crate) name_filter: u32,
     pub(crate) shared_indexes: Vec<u32>,
@@ -41,8 +44,6 @@ impl From<[u8; 4]> for EntryHeader {
     }
 }
 
-#[derive(Clone)]
-#[repr(transparent)]
 pub(crate) struct Prefix(pub(crate) Vec<u8>);
 
 impl Prefix {
@@ -56,12 +57,7 @@ impl Prefix {
 
 pub(crate) trait XAttrsEntryProvider {
     fn get_entry_header(&mut self) -> EntryHeader;
-    fn get_xattr_name(
-        &mut self,
-        pfs: &[Prefix],
-        header: &EntryHeader,
-        buffer: &mut [u8],
-    ) -> usize;
+    fn get_xattr_name(&mut self, pfs: &[Prefix], header: &EntryHeader, buffer: &mut [u8]) -> usize;
     fn get_xattr_value(
         &mut self,
         pfs: &[Prefix],
@@ -75,7 +71,6 @@ pub(crate) trait XAttrsEntryProvider {
 
 pub(crate) const EROFS_XATTR_LONG_PREFIX: u8 = 0x80;
 pub(crate) const EROFS_XATTR_LONG_MASK: u8 = 0x7f;
-
 
 #[allow(unused_macros)]
 macro_rules! static_cstr {
@@ -101,12 +96,7 @@ impl<'a> XAttrsEntryProvider for SkippableContinousIter<'a> {
         EntryHeader::from(buf)
     }
 
-    fn get_xattr_name(
-        &mut self,
-        pfs: &[Prefix],
-        header: &EntryHeader,
-        buffer: &mut [u8],
-    ) -> usize {
+    fn get_xattr_name(&mut self, pfs: &[Prefix], header: &EntryHeader, buffer: &mut [u8]) -> usize {
         let n_len = if header.name_index & EROFS_XATTR_LONG_PREFIX != 0 {
             let pf = pfs
                 .get((header.name_index & EROFS_XATTR_LONG_MASK) as usize)

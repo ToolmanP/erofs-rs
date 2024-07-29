@@ -7,6 +7,7 @@ use self::dir::DirCollection;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
+use super::alloc_helper::*;
 use super::inode::*;
 use super::map::*;
 use super::superblock::FileSystem;
@@ -254,12 +255,12 @@ where
                         .backend
                         .fill(&mut block[0..m.physical.len as usize], m.physical.start)
                     {
-                        Ok(rlen) => Some(Box::new(TempBuffer::new(block, 0, rlen as usize))),
+                        Ok(rlen) => Some(heap_alloc(TempBuffer::new(block, 0, rlen as usize))),
                         Err(_) => None,
                     }
                 } else {
                     match self.backend.get_temp_buffer(m.physical.start) {
-                        Ok(buffer) => Some(Box::new(buffer)),
+                        Ok(buffer) => Some(heap_alloc(buffer)),
                         Err(_) => None,
                     }
                 }
@@ -311,7 +312,7 @@ where
                 .backend
                 .as_buf(m.physical.start, m.physical.len.min(EROFS_BLOCK_SZ))
             {
-                Ok(buf) => Some(Box::new(buf)),
+                Ok(buf) => Some(heap_alloc(buf)),
                 Err(_) => None,
             },
             None => None,
@@ -362,7 +363,7 @@ where
         let pa = PageAddress::from(self.offset);
         let result: Option<Self::Item> = self.backend.get_temp_buffer(self.offset).map_or_else(
             |_| None,
-            |buffer| Some(Box::new(buffer) as Box<dyn Buffer + 'a>),
+            |buffer| Some(heap_alloc(buffer) as Box<dyn Buffer + 'a>),
         );
         self.offset += pa.pg_len;
         self.len -= pa.pg_len;
@@ -424,7 +425,7 @@ where
             |x| {
                 self.offset += x.content().len() as Off;
                 self.len -= x.content().len() as Off;
-                Some(Box::new(x) as Box<dyn Buffer + 'a>)
+                Some(heap_alloc(x) as Box<dyn Buffer + 'a>)
             },
         );
         result
