@@ -1,9 +1,9 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-only
 
-use alloc::boxed::Box;
-
+use super::alloc_helper::*;
 use super::*;
+use alloc::boxed::Box;
 use core::mem::{size_of, MaybeUninit};
 
 /// Represents the compact bitfield of the Erofs Inode format.
@@ -11,11 +11,8 @@ use core::mem::{size_of, MaybeUninit};
 #[derive(Clone, Copy)]
 pub(crate) struct Format(u16);
 
-
-
 /// The Version of the Inode which represents whether this inode is extended or compact.
 /// Extended inodes have more infos about nlinks + mtime.
-/// Documennted 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(crate) enum Version {
@@ -26,7 +23,7 @@ pub(crate) enum Version {
 
 /// Represents the data layout backed by the Inode.
 /// As Documented in https://erofs.docs.kernel.org/en/latest/core_ondisk.html#inode-data-layouts
-#[repr(C)] 
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub(crate) enum Layout {
     FlatPlain,
@@ -51,7 +48,7 @@ pub(crate) enum Type {
     Unknown,
 }
 
-/// This is format extracted from the 
+/// This is format extracted from the
 impl Format {
     pub(crate) fn version(&self) -> Version {
         match (self.0) & ((1 << 1) - 1) {
@@ -113,18 +110,55 @@ pub(crate) enum InodeInfo {
     Compact(CompactInodeInfo),
 }
 
+pub(crate) const CHUNK_BLKBITS_MASK: u16 = 0x1f;
+pub(crate) const CHUNK_FORMAT_INDEXES: u16 = 0x20;
+
+#[repr(C)]
+pub(crate) struct ChunkIndex {
+    pub(crate) advise: u16,
+    pub(crate) device_id: u16,
+    pub(crate) blkaddr: u32,
+}
+
+impl From<[u8; 8]> for ChunkIndex {
+    fn from(u: [u8; 8]) -> Self {
+        let advise = u16::from_le_bytes([u[0], u[1]]);
+        let device_id = u16::from_le_bytes([u[2], u[3]]);
+        let blkaddr = u32::from_le_bytes([u[4], u[5], u[6], u[7]]);
+        ChunkIndex {
+            advise,
+            device_id,
+            blkaddr,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ChunkSpec {
-    chunkformat: u16,
-    chunkbits: u8,
+pub(crate) enum DataSpec {
+    RawBlk(u32),
+    ChunkFormat(u16),
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Spec {
-    Chunk(ChunkSpec),
-    Data(u32),
+    Data(DataSpec),
     Device(u32),
     Unknown,
+}
+
+impl Spec {
+    pub(crate) fn data(u: &[u8; 4], layout: Layout) -> Self {
+        match layout {
+            Layout::FlatInline | Layout::FlatPlain => {
+                Spec::Data(DataSpec::RawBlk(u32::from_le_bytes(*u)))
+            }
+            Layout::Chunk => {
+                let chunkformat = u16::from_le_bytes([u[0], u[1]]);
+                Spec::Data(DataSpec::ChunkFormat(chunkformat))
+            }
+            _ => Spec::Unknown,
+        }
+    }
 }
 
 impl InodeInfo {
@@ -182,13 +216,13 @@ impl InodeInfo {
         };
 
         match mode & 0o170000 {
-            0o40000 => Spec::Data(u32::from_le_bytes(*u)), // Directory
-            0o100000 => Spec::Data(u32::from_le_bytes(*u)), // Regular File
-            0o120000 => Spec::Data(u32::from_le_bytes(*u)), // Symbolic Link
-            0o10000 => Spec::Device(0),                    // FIFO
-            0o140000 => Spec::Device(0),                   // Socket
-            0o60000 => unimplemented!(),                   // Block
-            0o20000 => unimplemented!(),                   // Character
+            0o40000 => Spec::data(u, self.format().layout()),
+            0o100000 => Spec::data(u, self.format().layout()),
+            0o120000 => Spec::data(u, self.format().layout()), // Real Data
+            0o10000 => Spec::Device(0),                        // FIFO
+            0o140000 => Spec::Device(0),                       // Socket
+            0o60000 => unimplemented!(),                       // Block
+            0o20000 => unimplemented!(),                       // Character
             _ => Spec::Unknown,
         }
     }
@@ -218,7 +252,7 @@ pub(crate) trait Inode: Sized {
     fn new(info: InodeInfo, nid: Nid, xattrs_header: xattrs::MemEntryIndexHeader) -> Self;
     fn info(&self) -> &InodeInfo;
     fn xattrs_header(&self) -> &xattrs::MemEntryIndexHeader;
-    fn nid(&self) -> &Nid;
+    fn nid(&self) -> Nid;
 }
 
 #[derive(Debug)]
@@ -270,7 +304,7 @@ pub(crate) trait InodeCollection {
     // In ilocked_get5 the inode will go through the late init phase;
     // we mimic this correspondingly;
     fn new_uninit_raw() -> Box<MaybeUninit<Self::I>> {
-        Box::new(MaybeUninit::<Self::I>::uninit())
+        heap_alloc(MaybeUninit::<Self::I>::uninit())
     }
 
     fn iget(&mut self, nid: Nid) -> (&mut MaybeUninit<Self::I>, bool);
@@ -307,8 +341,8 @@ pub(crate) mod tests {
         fn xattrs_header(&self) -> &xattrs::MemEntryIndexHeader {
             &self.xattr_header
         }
-        fn nid(&self) -> &Nid {
-            &self.nid
+        fn nid(&self) -> Nid {
+            self.nid
         }
         fn info(&self) -> &InodeInfo {
             &self.info
