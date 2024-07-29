@@ -1,5 +1,4 @@
 #![no_std]
-
 #![allow(dead_code)]
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-only
@@ -42,14 +41,16 @@ pub type Off = u64;
 /// Erofs requires inode nid to be a 64bit unsigned integer.
 pub type Nid = u64;
 
-mod compression;
-mod data;
-mod dir;
-mod inode;
-mod map;
-mod operations;
-mod superblock;
-mod xattrs;
+pub(crate) mod alloc_helper;
+pub(crate) mod compression;
+pub(crate) mod data;
+pub(crate) mod devices;
+pub(crate) mod dir;
+pub(crate) mod inode;
+pub(crate) mod map;
+pub(crate) mod operations;
+pub(crate) mod superblock;
+pub(crate) mod xattrs;
 
 /// Helper macro to round up or down a number.
 #[macro_export]
