@@ -27,7 +27,7 @@ where
     }
 }
 
-impl<T> FileBackend for UncompressedBackend<T> where T: FileSource {}
+impl<T> FileBackend for UncompressedBackend<T> where T: Source {}
 
 impl<'a, T> MemoryBackend<'a> for UncompressedBackend<T>
 where
