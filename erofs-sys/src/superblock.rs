@@ -4,14 +4,14 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::xattrs::DiskEntryIndexHeader;
-use crate::xattrs::XAttrsEntryProvider;
-
+use super::alloc_helper::*;
 use super::data::*;
+use super::devices::*;
 use super::dir::*;
 use super::inode::*;
 use super::map::*;
 use super::xattrs;
+use super::xattrs::*;
 use super::*;
 
 use core::mem::size_of;
@@ -47,6 +47,7 @@ pub struct SuperBlock {
     pub(crate) xattr_filter_reserved: u8,
     pub(crate) reserved: [u8; 23],
 }
+
 // SAFETY: SuperBlock uses all ffi-safe types.
 impl From<&[u8]> for SuperBlock {
     fn from(value: &[u8]) -> Self {
@@ -76,6 +77,7 @@ where
     I: Inode,
 {
     fn superblock(&self) -> &SuperBlock;
+    fn device_info(&self) -> &DeviceInfo;
     fn backend(&self) -> &dyn Backend;
     fn blknr(&self, pos: Off) -> Blk {
         (pos >> self.superblock().blkszbits) as Blk
@@ -131,7 +133,7 @@ where
             (((rlen - xattrs::XATTRS_HEADER_SIZE) >> 2) as usize).min(header.shared_count as usize);
         let outbound_count = header.shared_count as usize - inline_count;
 
-        indexes.extend_from_slice(unsafe {
+        extend_from_slice(&mut indexes, unsafe {
             core::slice::from_raw_parts(
                 (buf[xattrs::XATTRS_HEADER_SIZE as usize..len as usize])
                     .as_ptr()
@@ -151,7 +153,7 @@ where
                 (outbound_count << 2) as Off,
             ) {
                 let data = block.content();
-                indexes.extend_from_slice(unsafe {
+                extend_from_slice(&mut indexes, unsafe {
                     core::slice::from_raw_parts(data.as_ptr().cast(), data.len() >> 2)
                 });
             }
@@ -161,55 +163,135 @@ where
             }
         }
     }
-    fn flatmap(&self, inode: &I, offset: Off) -> Map {
-        let layout = inode.info().format().layout();
+    fn flatmap(&self, inode: &I, offset: Off, inline: bool) -> Map {
         let nblocks = self.blk_round_up(inode.info().file_size());
 
         let blkaddr = match inode.info().spec() {
-            Spec::Data(blkaddr) => blkaddr,
+            Spec::Data(ds) => match ds {
+                DataSpec::RawBlk(blkaddr) => blkaddr,
+                _ => unimplemented!(),
+            },
             _ => unimplemented!(),
         };
 
-        let lastblk = match layout {
-            Layout::FlatInline => nblocks - 1,
-            _ => nblocks,
-        };
+        let lastblk = if inline { nblocks - 1 } else { nblocks };
 
         if offset < self.blkpos(lastblk) {
             let len = self.blkpos(lastblk) - offset;
             Map {
-                index: 0,
-                offset: 0,
                 logical: AddressMap { start: offset, len },
                 physical: AddressMap {
                     start: self.blkpos(blkaddr) + offset,
                     len,
                 },
+                algorithm_format: 0,
+                device_id: 0,
+                flags: MAP_MAPPED,
             }
         } else {
-            match layout {
-                Layout::FlatInline => {
-                    let len = inode.info().file_size() - offset;
-                    Map {
-                        index: 0,
-                        offset: 0,
-                        logical: AddressMap { start: offset, len },
-                        physical: AddressMap {
-                            start: self.iloc(*inode.nid())
-                                + inode.info().inode_size()
-                                + inode.info().xattr_size()
-                                + self.blkoff(offset),
-                            len,
-                        },
-                    }
+            let len = inode.info().file_size() - offset;
+            if inline {
+                Map {
+                    logical: AddressMap { start: offset, len },
+                    physical: AddressMap {
+                        start: self.iloc(inode.nid())
+                            + inode.info().inode_size()
+                            + inode.info().xattr_size()
+                            + self.blkoff(offset),
+                        len,
+                    },
+                    algorithm_format: 0,
+                    device_id: 0,
+                    flags: MAP_MAPPED,
                 }
+            } else {
+                unimplemented!()
+            }
+        }
+    }
+
+    fn chunk_map(&self, inode: &I, offset: Off) -> Map {
+        let cs = match inode.info().spec() {
+            Spec::Data(ds) => match ds {
+                DataSpec::ChunkFormat(cs) => cs,
                 _ => unimplemented!(),
+            },
+            _ => unimplemented!(),
+        };
+        let chunkbits = ((cs & CHUNK_BLKBITS_MASK) + self.superblock().blkszbits as u16) as Off;
+
+        let chunknr = offset >> chunkbits;
+        if cs & CHUNK_FORMAT_INDEXES != 0 {
+            let unit = size_of::<ChunkIndex>() as Off;
+            let pos = round!(
+                UP,
+                self.iloc(inode.nid())
+                    + inode.info().inode_size()
+                    + inode.info().xattr_size()
+                    + unit * chunknr,
+                unit
+            );
+            let mut buf = [0u8; size_of::<ChunkIndex>()];
+            self.backend().fill(&mut buf, pos).unwrap();
+            let chunk_index = ChunkIndex::from(buf);
+
+            if chunk_index.blkaddr == u32::MAX {
+                Map::default()
+            } else {
+                Map {
+                    logical: AddressMap {
+                        start: chunknr << chunkbits,
+                        len: 1 << chunkbits,
+                    },
+                    physical: AddressMap {
+                        start: self.blkpos(chunk_index.blkaddr),
+                        len: 1 << chunkbits,
+                    },
+                    algorithm_format: 0,
+                    device_id: chunk_index.device_id & self.device_info().mask,
+                    flags: MAP_MAPPED,
+                }
+            }
+        } else {
+            let unit = 4;
+            let pos = round!(
+                UP,
+                self.iloc(inode.nid())
+                    + inode.info().inode_size()
+                    + inode.info().xattr_size()
+                    + unit * chunknr,
+                unit
+            );
+            let mut buf = [0u8; 4];
+            self.backend().fill(&mut buf, pos).unwrap();
+            let blkaddr = u32::from_le_bytes(buf);
+            if blkaddr == u32::MAX {
+                Map::default()
+            } else {
+                Map {
+                    logical: AddressMap {
+                        start: chunknr << chunkbits,
+                        len: 1 << chunkbits,
+                    },
+                    physical: AddressMap {
+                        start: self.blkpos(blkaddr),
+                        len: 1 << chunkbits,
+                    },
+                    algorithm_format: 0,
+                    device_id: 0,
+                    flags: MAP_MAPPED,
+                }
             }
         }
     }
 
     fn map(&self, inode: &I, offset: Off) -> Map {
-        self.flatmap(inode, offset)
+        match inode.info().format().layout() {
+            Layout::FlatInline => self.flatmap(inode, offset, true),
+            Layout::FlatPlain => self.flatmap(inode, offset, false),
+            Layout::Chunk => self.chunk_map(inode, offset),
+            _ => todo!(),
+        }
     }
 
     // TODO:: Remove the Box<dyn Iterator> here
@@ -247,7 +329,7 @@ where
         let shared_count = inode.xattrs_header().shared_indexes.len();
         let inline_count = count as usize - shared_count;
 
-        let inline_offset = self.iloc(*inode.nid())
+        let inline_offset = self.iloc(inode.nid())
             + inode.info().inode_size() as Off
             + size_of::<DiskEntryIndexHeader>() as Off
             + shared_count as Off * 4;
@@ -286,7 +368,7 @@ where
         let count = inode.info().xattr_count();
         let shared_count = inode.xattrs_header().shared_indexes.len();
         let inline_count = count as usize - shared_count;
-        let inline_offset = self.iloc(*inode.nid())
+        let inline_offset = self.iloc(inode.nid())
             + inode.info().inode_size() as Off
             + size_of::<DiskEntryIndexHeader>() as Off
             + shared_count as Off * 4;
@@ -331,7 +413,7 @@ where
     I: Inode,
     C: InodeCollection<I = I>,
 {
-    fn new(fs: Box<dyn FileSystem<I>>, c: C) -> Self {
+    pub(crate) fn new(fs: Box<dyn FileSystem<I>>, c: C) -> Self {
         Self {
             filesystem: fs,
             inodes: c,
@@ -376,7 +458,7 @@ pub(crate) mod tests {
 
     pub(crate) fn test_filesystem_ilookup(sbi: &mut SimpleBufferedFileSystem) {
         let inode = ilookup(&*sbi.filesystem, &mut sbi.inodes, "/texts/lipsum.txt").unwrap();
-        assert_eq!(*inode.nid(), SAMPLE_NID);
+        assert_eq!(inode.nid(), SAMPLE_NID);
         assert_eq!(inode.info().inode_type(), SAMPLE_TYPE);
         assert_eq!(inode.info().file_size(), SAMPLE_FILE_SIZE);
 

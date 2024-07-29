@@ -13,6 +13,7 @@ where
     backend: B,
     prefixes: Vec<xattrs::Prefix>,
     sb: SuperBlock,
+    device_info: DeviceInfo,
 }
 
 impl<I, B> FileSystem<I> for RawFileSystem<B>
@@ -28,7 +29,7 @@ where
     }
 
     fn mapped_iter<'b, 'a: 'b>(&'a self, inode: &'b I) -> Box<dyn BufferMapIter<'a> + 'b> {
-        Box::new(TempBufferMapIter::new(
+        heap_alloc(TempBufferMapIter::new(
             &self.backend,
             MapIter::new(self, inode),
         ))
@@ -38,10 +39,13 @@ where
         offset: Off,
         len: Off,
     ) -> Box<dyn ContinousBufferIter<'a> + 'a> {
-        Box::new(ContinuousTempBufferIter::new(&self.backend, offset, len))
+        heap_alloc(ContinuousTempBufferIter::new(&self.backend, offset, len))
     }
     fn xattr_prefixes(&self) -> &Vec<xattrs::Prefix> {
         &self.prefixes
+    }
+    fn device_info(&self) -> &DeviceInfo {
+        &self.device_info
     }
 }
 
@@ -54,10 +58,18 @@ where
         backend.fill(&mut buf, EROFS_SUPER_OFFSET).unwrap();
         let sb: SuperBlock = buf.into();
         let prefixes = get_xattr_prefixes(&sb, &backend);
+
+        let device_info = get_device_infos(&mut ContinuousTempBufferIter::new(
+            &backend,
+            sb.devt_slotoff as Off * 128,
+            sb.extra_devices as Off * 128,
+        ));
+
         Self {
             backend,
             sb,
             prefixes,
+            device_info,
         }
     }
 }
