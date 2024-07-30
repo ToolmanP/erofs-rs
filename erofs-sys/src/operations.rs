@@ -22,15 +22,7 @@ where
     I: Inode,
     C: InodeCollection<I = I>,
 {
-    let (inode, is_init) = collection.iget(nid);
-    if !is_init {
-        inode.write(I::new(
-            filesystem.read_inode_info(nid),
-            nid,
-            filesystem.read_inode_xattrs_index(nid),
-        ));
-    }
-    unsafe { inode.assume_init_mut() }
+    collection.iget(nid, filesystem)
 }
 
 pub(crate) fn ilookup<'a, I, C>(

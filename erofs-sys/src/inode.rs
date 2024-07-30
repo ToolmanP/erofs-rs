@@ -1,10 +1,12 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-only
 
-use super::alloc_helper::*;
-use super::*;
 use alloc::boxed::Box;
 use core::mem::{size_of, MaybeUninit};
+
+use super::alloc_helper::*;
+use super::superblock::*;
+use super::*;
 
 /// Represents the compact bitfield of the Erofs Inode format.
 #[repr(transparent)]
@@ -249,7 +251,12 @@ pub(crate) type InodeInfoBuf = [u8; size_of::<ExtendedInodeInfo>()];
 pub(crate) const DEFAULT_INODE_BUF: InodeInfoBuf = [0; size_of::<ExtendedInodeInfo>()];
 
 pub(crate) trait Inode: Sized {
-    fn new(info: InodeInfo, nid: Nid, xattrs_header: xattrs::MemEntryIndexHeader) -> Self;
+    fn new(
+        _sb: &SuperBlock,
+        info: InodeInfo,
+        nid: Nid,
+        xattrs_header: xattrs::MemEntryIndexHeader,
+    ) -> Self;
     fn info(&self) -> &InodeInfo;
     fn xattrs_header(&self) -> &xattrs::MemEntryIndexHeader;
     fn nid(&self) -> Nid;
@@ -297,6 +304,12 @@ impl TryFrom<InodeInfoBuf> for InodeInfo {
     }
 }
 
+pub(crate) struct InodeInitParam {
+    pub(crate) nid: Nid,
+    pub(crate) info: InodeInfo,
+    pub(crate) xattr_header: xattrs::MemEntryIndexHeader,
+}
+
 pub(crate) trait InodeCollection {
     type I: Inode + Sized;
 
@@ -307,7 +320,7 @@ pub(crate) trait InodeCollection {
         heap_alloc(MaybeUninit::<Self::I>::uninit())
     }
 
-    fn iget(&mut self, nid: Nid) -> (&mut MaybeUninit<Self::I>, bool);
+    fn iget(&mut self, nid: Nid, filesystem: &dyn FileSystem<Self::I>) -> &mut Self::I;
 }
 
 #[cfg(test)]
@@ -331,7 +344,12 @@ pub(crate) mod tests {
     }
 
     impl Inode for SimpleInode {
-        fn new(info: InodeInfo, nid: Nid, xattr_header: xattrs::MemEntryIndexHeader) -> Self {
+        fn new(
+            _sb: &SuperBlock,
+            info: InodeInfo,
+            nid: Nid,
+            xattr_header: xattrs::MemEntryIndexHeader,
+        ) -> Self {
             Self {
                 info,
                 xattr_header,
@@ -349,12 +367,17 @@ pub(crate) mod tests {
         }
     }
 
-    impl InodeCollection for HashMap<Nid, MaybeUninit<SimpleInode>> {
+    impl InodeCollection for HashMap<Nid, SimpleInode> {
         type I = SimpleInode;
-        fn iget(&mut self, nid: Nid) -> (&mut MaybeUninit<Self::I>, bool) {
+        fn iget(&mut self, nid: Nid, f: &dyn FileSystem<Self::I>) -> &mut Self::I {
             match self.entry(nid) {
-                Entry::Vacant(v) => (v.insert(MaybeUninit::<Self::I>::uninit()), false),
-                Entry::Occupied(o) => (o.into_mut(), true),
+                Entry::Vacant(v) => v.insert(Self::I::new(
+                    f.superblock(),
+                    f.read_inode_info(nid),
+                    nid,
+                    f.read_inode_xattrs_index(nid),
+                )),
+                Entry::Occupied(o) => o.into_mut(),
             }
         }
     }

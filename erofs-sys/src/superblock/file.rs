@@ -83,7 +83,6 @@ mod tests {
     use crate::superblock::tests::*;
     use crate::superblock::uncompressed::*;
     use alloc::boxed::Box;
-    use core::mem::MaybeUninit;
     use std::collections::HashMap;
     use std::fs::File;
     use std::os::unix::fs::FileExt;
@@ -100,7 +99,7 @@ mod tests {
     #[test]
     fn test_uncompressed_img_filesystem() {
         let file = load_fixture();
-        let mut filesystem: SuperblockInfo<SimpleInode, HashMap<Nid, MaybeUninit<SimpleInode>>> =
+        let mut filesystem: SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>> =
             SuperblockInfo::new(
                 Box::new(RawFileSystem::new(UncompressedBackend::new(file))),
                 HashMap::new(),

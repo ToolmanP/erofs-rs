@@ -4,6 +4,8 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
+use crate::round;
+
 use super::alloc_helper::*;
 use super::data::*;
 use super::devices::*;
@@ -428,7 +430,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::inode::tests::*;
     use crate::operations::*;
-    use core::mem::MaybeUninit;
     use hex_literal::hex;
     use sha2::{Digest, Sha512};
     use std::collections::HashMap;
@@ -438,7 +439,7 @@ pub(crate) mod tests {
     pub(crate) const SB_MAGIC: u32 = 0xE0F5E1E2;
 
     pub(crate) type SimpleBufferedFileSystem =
-        SuperblockInfo<SimpleInode, HashMap<Nid, MaybeUninit<SimpleInode>>>;
+        SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>>;
 
     pub(crate) fn load_fixture() -> File {
         let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/sample.img"));

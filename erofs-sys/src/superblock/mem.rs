@@ -82,7 +82,6 @@ mod tests {
     use crate::superblock::uncompressed::*;
     use crate::superblock::PageSource;
     use crate::Off;
-    use core::mem::MaybeUninit;
     use memmap2::MmapMut;
     use std::collections::HashMap;
 
@@ -131,7 +130,7 @@ mod tests {
     #[test]
     fn test_uncompressed_mmap_filesystem() {
         let file = load_fixture();
-        let mut filesystem: SuperblockInfo<SimpleInode, HashMap<Nid, MaybeUninit<SimpleInode>>> =
+        let mut filesystem: SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>> =
             SuperblockInfo::new(
                 Box::new(MemFileSystem::new(UncompressedBackend::new(unsafe {
                     MmapMut::map_mut(&file).unwrap()
