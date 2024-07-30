@@ -1,8 +1,5 @@
-// Copyright 2024 Google LLC
-// SPDX-License-Identifier: Apache-2.0
-
-#[cfg(CONFIG_FS_EROFS)]
-use kernel::prelude::*;
+// Copyright 2024 Yiyang Wu
+// SPDX-License-Identifier: MIT or GPL-2.0-only
 
 use crate::data::*;
 use crate::*;
