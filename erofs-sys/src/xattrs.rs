@@ -1,8 +1,8 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-only
 
-use crate::data::*;
-use crate::*;
+use super::data::*;
+use super::*;
 
 use alloc::vec::Vec;
 
