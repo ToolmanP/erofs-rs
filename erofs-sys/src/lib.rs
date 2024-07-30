@@ -30,6 +30,8 @@ impl From<u64> for PageAddress {
 
 // It's unavoidable to import alloc here. Since there are so many backends there and if we want to
 // to use trait object to export Filesystem pointer. The alloc crate here is necessary.
+
+#[cfg(not(CONFIG_EROFS_FS = "y"))]
 extern crate alloc;
 
 /// Erofs Operates on the block/page size of 4096 we respect that.
