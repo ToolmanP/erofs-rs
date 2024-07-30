@@ -14,6 +14,7 @@ pub(crate) const EROFS_BLOCK_MASK: u64 = EROFS_BLOCK_SZ - 1;
 
 pub(crate) struct PageAddress {
     pub(crate) page: u64,
+    pub(crate) pg_index: u64,
     pub(crate) pg_off: u64,
     pub(crate) pg_len: u64,
 }
@@ -22,6 +23,7 @@ impl From<u64> for PageAddress {
     fn from(address: u64) -> Self {
         PageAddress {
             page: (address >> EROFS_BLOCK_BITS) << EROFS_BLOCK_BITS,
+            pg_index: address >> EROFS_BLOCK_BITS,
             pg_off: address & EROFS_BLOCK_MASK,
             pg_len: EROFS_BLOCK_SZ - (address & EROFS_BLOCK_MASK),
         }
