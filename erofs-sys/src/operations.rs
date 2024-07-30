@@ -46,6 +46,28 @@ where
     Some(read_inode(filesystem, collection, nid))
 }
 
+pub(crate) fn dir_lookup<'a, I, C>(
+    filesystem: &'a dyn FileSystem<I>,
+    collection: &'a mut C,
+    inode: &I,
+    name: &str,
+) -> Option<&'a mut I>
+where
+    I: Inode,
+    C: InodeCollection<I = I>,
+{
+    let mut nid = inode.nid();
+    for part in name.split('/') {
+        if part.is_empty() {
+            continue;
+        }
+        let inode = read_inode(filesystem, collection, nid); // this part collection is reborrowed for shorter
+                                                             // lifetime inside the loop;
+        nid = filesystem.find_nid(inode, part)?
+    }
+    Some(read_inode(filesystem, collection, nid))
+}
+
 pub(crate) fn get_xattr_prefixes(sb: &SuperBlock, backend: &dyn Backend) -> Vec<xattrs::Prefix> {
     let mut result: Vec<xattrs::Prefix> = Vec::new();
     for data in MetadataBufferIter::new(
