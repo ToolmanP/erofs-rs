@@ -3,15 +3,17 @@
 
 pub(crate) mod uncompressed;
 
-use self::dir::DirCollection;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use super::alloc_helper::*;
+use super::dir::*;
 use super::inode::*;
 use super::map::*;
-use super::superblock::FileSystem;
+use super::superblock::*;
 use super::*;
+
+use crate::round;
 
 #[derive(Debug)]
 pub(crate) enum SourceError {
@@ -474,7 +476,8 @@ impl<'a> Iterator for MetadataBufferIter<'a> {
 
         let data = self.buffer.content();
         let size = u16::from_le_bytes([data[0], data[1]]) as usize;
-        let result = data[2..size + 2].to_vec();
+        let mut result: Vec<u8> = Vec::new();
+        extend_from_slice(&mut result, &data[2..size + 2]);
         self.buffer.start = round!(UP, self.buffer.start + size + 2, 4);
         self.total -= 1;
         Some(result)
