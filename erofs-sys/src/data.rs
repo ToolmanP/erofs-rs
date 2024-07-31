@@ -191,11 +191,11 @@ where
     FS: FileSystem<I>,
     I: Inode,
 {
-    pub(crate) fn new(sbi: &'a FS, inode: &'b I) -> Self {
+    pub(crate) fn new(sbi: &'a FS, inode: &'b I, offset: Off) -> Self {
         Self {
             sbi,
             inode,
-            offset: 0,
+            offset,
             len: inode.info().file_size(),
         }
     }

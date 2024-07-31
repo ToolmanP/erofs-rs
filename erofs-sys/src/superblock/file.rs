@@ -28,10 +28,14 @@ where
         &self.backend
     }
 
-    fn mapped_iter<'b, 'a: 'b>(&'a self, inode: &'b I) -> Box<dyn BufferMapIter<'a> + 'b> {
+    fn mapped_iter<'b, 'a: 'b>(
+        &'a self,
+        inode: &'b I,
+        offset: Off,
+    ) -> Box<dyn BufferMapIter<'a> + 'b> {
         heap_alloc(TempBufferMapIter::new(
             &self.backend,
-            MapIter::new(self, inode),
+            MapIter::new(self, inode, offset),
         ))
     }
     fn continous_iter<'a>(

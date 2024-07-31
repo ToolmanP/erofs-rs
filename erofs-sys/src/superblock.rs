@@ -302,13 +302,17 @@ where
     // If we want to have trait object that can be exported to c_void
     // Leave it as it is for tradeoffs
 
-    fn mapped_iter<'b, 'a: 'b>(&'a self, inode: &'b I) -> Box<dyn BufferMapIter<'a> + 'b>;
+    fn mapped_iter<'b, 'a: 'b>(
+        &'a self,
+        inode: &'b I,
+        offset: Off,
+    ) -> Box<dyn BufferMapIter<'a> + 'b>;
 
     fn continous_iter<'a>(&'a self, offset: Off, len: Off)
         -> Box<dyn ContinousBufferIter<'a> + 'a>;
 
-    fn fill_dentries(&self, inode: &I, emitter: &dyn Fn(Dirent<'_>)) {
-        for buf in self.mapped_iter(inode) {
+    fn fill_dentries(&self, inode: &I, offset: Off, emitter: &dyn Fn(Dirent<'_>)) {
+        for buf in self.mapped_iter(inode, offset) {
             for dirent in buf.iter_dir() {
                 emitter(dirent)
             }
@@ -316,7 +320,7 @@ where
     }
 
     fn find_nid(&self, inode: &I, name: &str) -> Option<Nid> {
-        for buf in self.mapped_iter(inode) {
+        for buf in self.mapped_iter(inode, 0) {
             for dirent in buf.iter_dir() {
                 if dirent.dirname() == name.as_bytes() {
                     return Some(dirent.desc.nid);
@@ -464,7 +468,7 @@ pub(crate) mod tests {
         assert_eq!(inode.info().file_size(), SAMPLE_FILE_SIZE);
 
         let mut hasher = Sha512::new();
-        for block in sbi.filesystem.mapped_iter(inode) {
+        for block in sbi.filesystem.mapped_iter(inode, 0) {
             hasher.update(block.content());
         }
         let result = hasher.finalize();
