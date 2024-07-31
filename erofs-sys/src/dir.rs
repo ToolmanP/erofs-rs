@@ -53,6 +53,12 @@ impl<'a> DirCollection<'a> {
             })
         }
     }
+    pub(crate) fn skip_dir(&mut self, offset: usize) {
+        self.offset += offset;
+    }
+    pub(crate) fn total(&self) -> usize {
+        self.total
+    }
 }
 
 impl<'a> Iterator for DirCollection<'a> {
