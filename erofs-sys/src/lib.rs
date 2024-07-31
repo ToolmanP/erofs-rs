@@ -37,13 +37,13 @@ impl From<u64> for PageAddress {
 extern crate alloc;
 
 /// Erofs Operates on the block/page size of 4096 we respect that.
-pub type Block = [u8; EROFS_BLOCK_SZ as usize];
+pub(crate) type Block = [u8; EROFS_BLOCK_SZ as usize];
 /// Erofs requires block index to a 32 bit unsigned integer.
-pub type Blk = u32;
+pub(crate) type Blk = u32;
 /// Erofs requires normal offset to be a 64bit unsigned integer.
-pub type Off = u64;
+pub(crate) type Off = u64;
 /// Erofs requires inode nid to be a 64bit unsigned integer.
-pub type Nid = u64;
+pub(crate) type Nid = u64;
 
 pub(crate) mod alloc_helper;
 pub(crate) mod compression;

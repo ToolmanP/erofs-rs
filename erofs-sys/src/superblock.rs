@@ -311,25 +311,36 @@ where
     fn continous_iter<'a>(&'a self, offset: Off, len: Off)
         -> Box<dyn ContinousBufferIter<'a> + 'a>;
 
-    fn fill_dentries(&self, inode: &I, offset: Off, emitter: &dyn Fn(Dirent<'_>)) {
+    fn fill_dentries(&self, inode: &I, offset: Off, emitter: &mut dyn FnMut(Dirent<'_>, Off)) {
         if offset > inode.info().file_size() {
             return;
         }
+
         let map_offset = round!(DOWN, offset, self.blksz());
         let blk_offset = round!(UP, self.blkoff(offset), size_of::<DirentDesc>() as Off);
+
         let mut map_iter = self.mapped_iter(inode, map_offset);
         let first_buf = map_iter.next().unwrap();
         let mut collection = first_buf.iter_dir();
+
+        let mut pos: Off = map_offset + blk_offset;
+
         if blk_offset as usize / size_of::<DirentDesc>() <= collection.total() {
             collection.skip_dir(blk_offset as usize / size_of::<DirentDesc>());
             for dirent in collection {
-                emitter(dirent);
+                emitter(dirent, pos);
+                pos += size_of::<DirentDesc>() as Off;
             }
         }
+
+        pos = round!(UP, pos, self.blksz());
+
         for buf in map_iter {
             for dirent in buf.iter_dir() {
-                emitter(dirent);
+                emitter(dirent, pos);
+                pos += size_of::<DirentDesc>() as Off;
             }
+            pos = round!(UP, pos, self.blksz());
         }
     }
 

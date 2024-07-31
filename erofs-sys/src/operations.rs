@@ -46,7 +46,7 @@ where
     Some(read_inode(filesystem, collection, nid))
 }
 
-pub(crate) fn dir_lookup<'a, I, C>(
+pub(crate) fn dir_walk<'a, I, C>(
     filesystem: &'a dyn FileSystem<I>,
     collection: &'a mut C,
     inode: &I,
@@ -66,6 +66,21 @@ where
         nid = filesystem.find_nid(inode, part)?
     }
     Some(read_inode(filesystem, collection, nid))
+}
+
+pub(crate) fn dir_lookup<'a, I, C>(
+    filesystem: &'a dyn FileSystem<I>,
+    collection: &'a mut C,
+    inode: &I,
+    name: &str,
+) -> Option<&'a mut I>
+where
+    I: Inode,
+    C: InodeCollection<I = I>,
+{
+    filesystem
+        .find_nid(inode, name)
+        .map(|nid| read_inode(filesystem, collection, nid))
 }
 
 pub(crate) fn get_xattr_prefixes(sb: &SuperBlock, backend: &dyn Backend) -> Vec<xattrs::Prefix> {
