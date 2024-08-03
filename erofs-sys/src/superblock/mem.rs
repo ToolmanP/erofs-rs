@@ -137,13 +137,12 @@ mod tests {
     #[test]
     fn test_uncompressed_mmap_filesystem() {
         let file = load_fixture();
-        let mut sbi: SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>> =
-            SuperblockInfo::new(
-                Box::new(MemFileSystem::new(UncompressedBackend::new(unsafe {
-                    MmapMut::map_mut(&file).unwrap()
-                }))),
-                HashMap::new(),
-            );
+        let mut sbi: SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>> = SuperblockInfo::new(
+            Box::new(MemFileSystem::new(UncompressedBackend::new(unsafe {
+                MmapMut::map_mut(&file).unwrap()
+            }))),
+            HashMap::new(),
+        );
         test_filesystem(&mut sbi);
     }
 }
