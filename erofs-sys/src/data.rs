@@ -31,10 +31,11 @@ pub(crate) type BackendResult<T> = Result<T, BackendError>;
 
 pub(crate) trait Source {
     fn fill(&self, data: &mut [u8], offset: Off) -> SourceResult<u64>;
-    fn get_temp_buffer(&self, offset: Off) -> SourceResult<TempBuffer> {
+    fn get_temp_buffer(&self, offset: Off, maxsize: Off) -> SourceResult<TempBuffer> {
         let mut block: Block = EROFS_EMPTY_BLOCK;
-        self.fill(&mut block, round!(DOWN, offset, EROFS_BLOCK_SZ as Off))
-            .map(|sz| TempBuffer::new(block, 0, sz as usize))
+        let pa = PageAddress::from(offset);
+        self.fill(&mut block, pa.page)
+            .map(|sz| TempBuffer::new(block, pa.pg_off as usize, sz.min(maxsize) as usize))
     }
 }
 
@@ -48,7 +49,7 @@ pub(crate) trait PageSource<'a>: Source {
 
 pub(crate) trait Backend {
     fn fill(&self, data: &mut [u8], offset: Off) -> BackendResult<u64>;
-    fn get_temp_buffer(&self, offset: Off) -> BackendResult<TempBuffer>;
+    fn get_temp_buffer(&self, offset: Off, maxsize: Off) -> BackendResult<TempBuffer>;
 }
 
 pub(crate) trait FileBackend: Backend {}
@@ -261,7 +262,10 @@ where
                         Err(_) => None,
                     }
                 } else {
-                    match self.backend.get_temp_buffer(m.physical.start) {
+                    match self
+                        .backend
+                        .get_temp_buffer(m.physical.start, m.logical.len)
+                    {
                         Ok(buffer) => Some(heap_alloc(buffer)),
                         Err(_) => None,
                     }
@@ -362,13 +366,17 @@ where
             return None;
         }
 
-        let pa = PageAddress::from(self.offset);
-        let result: Option<Self::Item> = self.backend.get_temp_buffer(self.offset).map_or_else(
-            |_| None,
-            |buffer| Some(heap_alloc(buffer) as Box<dyn Buffer + 'a>),
-        );
-        self.offset += pa.pg_len;
-        self.len -= pa.pg_len;
+        let result: Option<Self::Item> = self
+            .backend
+            .get_temp_buffer(self.offset, self.len)
+            .map_or_else(
+                |_| None,
+                |buffer| {
+                    self.offset += buffer.content().len() as Off;
+                    self.len -= buffer.content().len() as Off;
+                    Some(heap_alloc(buffer) as Box<dyn Buffer + 'a>)
+                },
+            );
         result
     }
 }
@@ -422,7 +430,8 @@ where
         }
 
         let pa = PageAddress::from(self.offset);
-        let result: Option<Self::Item> = self.backend.as_buf(self.offset, pa.pg_len).map_or_else(
+        let len = pa.pg_len.min(self.len);
+        let result: Option<Self::Item> = self.backend.as_buf(self.offset, len).map_or_else(
             |_| None,
             |x| {
                 self.offset += x.content().len() as Off;
@@ -470,7 +479,10 @@ impl<'a> Iterator for MetadataBufferIter<'a> {
         }
 
         if self.buffer.start == self.buffer.maxsize {
-            self.buffer = self.backend.get_temp_buffer(self.offset).unwrap();
+            self.buffer = self
+                .backend
+                .get_temp_buffer(self.offset, EROFS_BLOCK_SZ)
+                .unwrap();
             self.offset += self.buffer.maxsize as Off;
         }
 

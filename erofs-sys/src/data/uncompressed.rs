@@ -19,8 +19,8 @@ where
             .fill(data, offset)
             .map_or_else(|_| Err(BackendError::Dummy), Ok)
     }
-    fn get_temp_buffer(&self, offset: Off) -> BackendResult<TempBuffer> {
-        match self.source.get_temp_buffer(offset) {
+    fn get_temp_buffer(&self, offset: Off, maxsize: Off) -> BackendResult<TempBuffer> {
+        match self.source.get_temp_buffer(offset, maxsize) {
             Ok(buffer) => Ok(buffer),
             Err(_) => Err(BackendError::Dummy),
         }

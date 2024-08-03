@@ -103,12 +103,11 @@ mod tests {
     #[test]
     fn test_uncompressed_img_filesystem() {
         let file = load_fixture();
-        let mut filesystem: SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>> =
+        let mut sbi: SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>> =
             SuperblockInfo::new(
                 Box::new(RawFileSystem::new(UncompressedBackend::new(file))),
                 HashMap::new(),
             );
-        test_superblock_def(&mut filesystem);
-        test_filesystem_ilookup(&mut filesystem);
+        test_filesystem(&mut sbi);
     }
 }

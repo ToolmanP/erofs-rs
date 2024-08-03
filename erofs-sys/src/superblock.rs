@@ -477,27 +477,54 @@ pub(crate) mod tests {
         file.unwrap()
     }
 
-    pub(crate) fn test_superblock_def(sbi: &mut SimpleBufferedFileSystem) {
+    fn test_superblock_def(sbi: &mut SimpleBufferedFileSystem) {
         assert_eq!(sbi.filesystem.superblock().magic, SB_MAGIC);
     }
 
-    const SAMPLE_HEX: [u8;64] = hex!("6846740fd4c03c86524d39e0012ec8eb1e4b87e8a90c65227904148bc0e4d0592c209151a736946133cd57f7ec59c4e8a445e7732322dda9ce356f8d0100c4ca");
-    const SAMPLE_NID: u64 = 640;
-    const SAMPLE_FILE_SIZE: u64 = 5060;
-    const SAMPLE_TYPE: Type = Type::Regular;
-
-    pub(crate) fn test_filesystem_ilookup(sbi: &mut SimpleBufferedFileSystem) {
+    fn test_filesystem_ilookup(sbi: &mut SimpleBufferedFileSystem) {
+        const LIPSUM_HEX: [u8;64] = hex!("6846740fd4c03c86524d39e0012ec8eb1e4b87e8a90c65227904148bc0e4d0592c209151a736946133cd57f7ec59c4e8a445e7732322dda9ce356f8d0100c4ca");
+        const LIPSUM_NID: u64 = 640;
+        const LIPSUM_FILE_SIZE: u64 = 5060;
+        const LIPSUM_TYPE: Type = Type::Regular;
         let inode = ilookup(&*sbi.filesystem, &mut sbi.inodes, "/texts/lipsum.txt").unwrap();
-        assert_eq!(inode.nid(), SAMPLE_NID);
-        assert_eq!(inode.info().inode_type(), SAMPLE_TYPE);
-        assert_eq!(inode.info().file_size(), SAMPLE_FILE_SIZE);
+        assert_eq!(inode.nid(), LIPSUM_NID);
+        assert_eq!(inode.info().inode_type(), LIPSUM_TYPE);
+        assert_eq!(inode.info().file_size(), LIPSUM_FILE_SIZE);
 
         let mut hasher = Sha512::new();
         for block in sbi.filesystem.mapped_iter(inode, 0) {
             hasher.update(block.content());
         }
         let result = hasher.finalize();
-        assert_eq!(result[..], SAMPLE_HEX);
+        assert_eq!(result[..], LIPSUM_HEX);
+    }
+
+    fn test_continous_iter(sbi: &mut SimpleBufferedFileSystem) {
+        const README_HEX: [u8; 64] = hex!("99fffc75aec028f417d9782fffed6c5d877a29ad1b16fc62bfeb168cdaf8db6db2bad1814904cd0fa18a2396c2c618041682a010601f4052b9895138d4ed6f16");
+        const README_NID: u64 = 44;
+        const README_FILE_SIZE: u64 = 38;
+        const README_TYPE: Type = Type::Regular;
+        let inode = ilookup(&*sbi.filesystem, &mut sbi.inodes, "/README.md").unwrap();
+        assert_eq!(inode.nid(), README_NID);
+        assert_eq!(inode.info().inode_type(), README_TYPE);
+        assert_eq!(inode.info().file_size(), README_FILE_SIZE);
+        let map = sbi.filesystem.map(inode, 0);
+
+        let mut hasher = Sha512::new();
+        for block in sbi
+            .filesystem
+            .continous_iter(map.physical.start, map.physical.len)
+        {
+            hasher.update(block.content());
+        }
+        let result = hasher.finalize();
+        assert_eq!(result[..], README_HEX);
+    }
+
+    pub(crate) fn test_filesystem(sbi: &mut SimpleBufferedFileSystem) {
+        test_superblock_def(sbi);
+        test_filesystem_ilookup(sbi);
+        test_continous_iter(sbi);
     }
 
     #[test]
