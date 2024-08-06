@@ -23,7 +23,7 @@ pub(crate) mod mem;
 
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]
-pub struct SuperBlock {
+pub(crate) struct SuperBlock {
     pub(crate) magic: u32,
     pub(crate) checksum: i32,
     pub(crate) feature_compat: i32,
@@ -51,23 +51,42 @@ pub struct SuperBlock {
 }
 
 // SAFETY: SuperBlock uses all ffi-safe types.
-impl From<&[u8]> for SuperBlock {
-    fn from(value: &[u8]) -> Self {
-        unsafe { *(value.as_ptr() as *const SuperBlock) }
+impl TryFrom<&[u8]> for SuperBlock {
+    type Error = core::array::TryFromSliceError;
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        value[0..128].try_into()
     }
 }
 
 // SAFETY: SuperBlock uses all ffi-safe types.
 impl From<[u8; 128]> for SuperBlock {
     fn from(value: [u8; 128]) -> Self {
-        unsafe { *(value.as_ptr() as *const SuperBlock) }
-    }
-}
-
-// SAFETY: SuperBlock uses all ffi-safe types.
-impl From<SuperBlock> for [u8; 128] {
-    fn from(value: SuperBlock) -> Self {
-        unsafe { core::mem::transmute(value) }
+        Self {
+            magic: u32::from_le_bytes(value[0..4].try_into().unwrap()),
+            checksum: i32::from_le_bytes(value[4..8].try_into().unwrap()),
+            feature_compat: i32::from_le_bytes(value[8..12].try_into().unwrap()),
+            blkszbits: value[12],
+            sb_extslots: value[13],
+            root_nid: i16::from_le_bytes(value[14..16].try_into().unwrap()),
+            inos: i64::from_le_bytes(value[16..24].try_into().unwrap()),
+            build_time: i64::from_le_bytes(value[24..32].try_into().unwrap()),
+            build_time_nsec: i32::from_le_bytes(value[32..36].try_into().unwrap()),
+            blocks: i32::from_le_bytes(value[36..40].try_into().unwrap()),
+            meta_blkaddr: u32::from_le_bytes(value[40..44].try_into().unwrap()),
+            xattr_blkaddr: u32::from_le_bytes(value[44..48].try_into().unwrap()),
+            uuid: value[48..64].try_into().unwrap(),
+            volume_name: value[64..80].try_into().unwrap(),
+            feature_incompat: i32::from_le_bytes(value[80..84].try_into().unwrap()),
+            compression: i16::from_le_bytes(value[84..86].try_into().unwrap()),
+            extra_devices: i16::from_le_bytes(value[86..88].try_into().unwrap()),
+            devt_slotoff: i16::from_le_bytes(value[88..90].try_into().unwrap()),
+            dirblkbits: value[90],
+            xattr_prefix_count: value[91],
+            xattr_prefix_start: i32::from_le_bytes(value[92..96].try_into().unwrap()),
+            packed_nid: i64::from_le_bytes(value[96..104].try_into().unwrap()),
+            xattr_filter_reserved: value[104],
+            reserved: value[105..128].try_into().unwrap(),
+        }
     }
 }
 
@@ -108,7 +127,7 @@ where
 
     fn read_inode_info(&self, nid: Nid) -> InodeInfo {
         let offset = self.iloc(nid);
-        let mut buf: InodeInfoBuf = DEFAULT_INODE_BUF;
+        let mut buf: ExtendedInodeInfoBuf = DEFAULT_INODE_BUF;
         self.backend().fill(&mut buf, offset).unwrap();
         InodeInfo::try_from(buf).unwrap()
     }

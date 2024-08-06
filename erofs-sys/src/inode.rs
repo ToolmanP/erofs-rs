@@ -256,8 +256,9 @@ impl InodeInfo {
     }
 }
 
-pub(crate) type InodeInfoBuf = [u8; size_of::<ExtendedInodeInfo>()];
-pub(crate) const DEFAULT_INODE_BUF: InodeInfoBuf = [0; size_of::<ExtendedInodeInfo>()];
+pub(crate) type CompactInodeInfoBuf = [u8; size_of::<CompactInodeInfo>()];
+pub(crate) type ExtendedInodeInfoBuf = [u8; size_of::<ExtendedInodeInfo>()];
+pub(crate) const DEFAULT_INODE_BUF: ExtendedInodeInfoBuf = [0; size_of::<ExtendedInodeInfo>()];
 
 pub(crate) trait Inode: Sized {
     fn new(
@@ -272,19 +273,31 @@ pub(crate) trait Inode: Sized {
 }
 
 #[derive(Debug)]
-pub enum InodeError {
+pub(crate) enum InodeError {
     VersionError,
     UnknownError,
 }
 
 type InodeResult<T> = Result<T, InodeError>;
 
-impl<'a> TryFrom<&'a [u8]> for &'a CompactInodeInfo {
+impl TryFrom<CompactInodeInfoBuf> for CompactInodeInfo {
     type Error = InodeError;
-    fn try_from(value: &'a [u8]) -> Result<Self, Self::Error> {
+    fn try_from(value: CompactInodeInfoBuf) -> Result<Self, Self::Error> {
         //SAFETY: all the types present are ffi-safe. safe to cast here since only [u8;64] could be
         //passed into this function and it's definitely safe.
-        let inode: &'a CompactInodeInfo = unsafe { &*(value.as_ptr() as *const CompactInodeInfo) };
+        let inode: CompactInodeInfo = Self {
+            i_format: Format(u16::from_le_bytes(value[0..2].try_into().unwrap())),
+            i_xattr_icount: u16::from_le_bytes(value[2..4].try_into().unwrap()),
+            i_mode: u16::from_le_bytes(value[4..6].try_into().unwrap()),
+            i_nlink: u16::from_le_bytes(value[6..8].try_into().unwrap()),
+            i_size: u32::from_le_bytes(value[8..12].try_into().unwrap()),
+            i_reserved: value[12..16].try_into().unwrap(),
+            i_u: value[16..20].try_into().unwrap(),
+            i_ino: u32::from_le_bytes(value[20..24].try_into().unwrap()),
+            i_uid: u16::from_le_bytes(value[24..26].try_into().unwrap()),
+            i_gid: u16::from_le_bytes(value[26..28].try_into().unwrap()),
+            i_reserved2: value[28..32].try_into().unwrap(),
+        };
         let ifmt = &inode.i_format;
         match ifmt.version() {
             Version::Compat => Ok(inode),
@@ -294,19 +307,33 @@ impl<'a> TryFrom<&'a [u8]> for &'a CompactInodeInfo {
     }
 }
 
-impl TryFrom<InodeInfoBuf> for InodeInfo {
+impl TryFrom<ExtendedInodeInfoBuf> for InodeInfo {
     type Error = InodeError;
-    fn try_from(value: InodeInfoBuf) -> Result<Self, Self::Error> {
-        let r: Result<&CompactInodeInfo, Self::Error> = value.as_slice().try_into();
+    fn try_from(value: ExtendedInodeInfoBuf) -> Result<Self, Self::Error> {
+        let compact_buf: CompactInodeInfoBuf = value[0..32].try_into().unwrap();
+        let r: Result<CompactInodeInfo, Self::Error> = CompactInodeInfo::try_from(compact_buf);
+
         match r {
-            Ok(compact) => Ok(InodeInfo::Compact(*compact)),
+            Ok(compact) => Ok(InodeInfo::Compact(compact)),
             Err(e) => match e {
                 //SAFETY: Note that try_into will return VersionError. This suggests that current
                 //buffer contains the extended inode. Since the types used are FFI-safe, it's safe
                 //to transtmute it here.
-                InodeError::VersionError => {
-                    Ok(InodeInfo::Extended(unsafe { core::mem::transmute(value) }))
-                }
+                InodeError::VersionError => Ok(InodeInfo::Extended(ExtendedInodeInfo {
+                    i_format: Format(u16::from_le_bytes(value[0..2].try_into().unwrap())),
+                    i_xattr_icount: u16::from_le_bytes(value[2..4].try_into().unwrap()),
+                    i_mode: u16::from_le_bytes(value[4..6].try_into().unwrap()),
+                    i_reserved: value[6..8].try_into().unwrap(),
+                    i_size: u64::from_le_bytes(value[8..16].try_into().unwrap()),
+                    i_u: value[16..20].try_into().unwrap(),
+                    i_ino: u32::from_le_bytes(value[20..24].try_into().unwrap()),
+                    i_uid: u32::from_le_bytes(value[24..28].try_into().unwrap()),
+                    i_gid: u32::from_le_bytes(value[28..32].try_into().unwrap()),
+                    i_mtime: u64::from_le_bytes(value[32..40].try_into().unwrap()),
+                    i_mtime_nsec: u32::from_le_bytes(value[40..44].try_into().unwrap()),
+                    i_nlink: u32::from_le_bytes(value[44..48].try_into().unwrap()),
+                    i_reserved2: value[48..64].try_into().unwrap(),
+                })),
                 _ => Err(e),
             },
         }
