@@ -558,25 +558,27 @@ impl<'a> SkippableContinousIter<'a> {
         }
     }
 
-    pub(crate) fn cmp_with_buf(&mut self, buf: &[u8]) -> (Off, bool) {
+    pub(crate) fn try_cmp(&mut self, buf: &[u8]) -> Result<(), u64> {
         let d_len = self.data.content().len() as Off - self.d_off;
         let b_len = buf.len() as Off;
         let mut b_off = 0 as Off;
 
         if d_len != 0 && d_len >= b_len {
-            let result = self.data.content()[self.d_off as usize..(self.d_off + b_len) as usize]
-                == buf[0..b_len as usize];
-            self.d_off += b_len;
-            (b_len, result)
+            if self.data.content()[self.d_off as usize..(self.d_off + b_len) as usize]
+                == buf[0..b_len as usize]
+            {
+                Ok(())
+            } else {
+                Err(b_len)
+            }
         } else {
-            let mut result = true;
             if d_len != 0 {
                 let cmp_len = d_len.min(b_len);
-                result = self.data.content()[self.d_off as usize..(self.d_off + cmp_len) as usize]
-                    == buf[0..cmp_len as usize];
                 b_off += cmp_len;
-                if !result {
-                    return (b_off, result);
+                if self.data.content()[self.d_off as usize..(self.d_off + cmp_len) as usize]
+                    != buf[0..cmp_len as usize]
+                {
+                    return Err(b_off);
                 }
             }
             while b_off < b_len {
@@ -584,13 +586,12 @@ impl<'a> SkippableContinousIter<'a> {
                 self.data = self.iter.next().unwrap();
                 let d_len = self.data.content().len() as Off;
                 let cmp_len = d_len.min(b_len - b_off);
-                result &= self.data.content()[0..cmp_len as usize] == buf[b_off as usize..];
                 b_off += cmp_len;
-                if !result {
-                    return (b_off, result);
+                if self.data.content()[0..cmp_len as usize] != buf[b_off as usize..] {
+                    return Err(b_off);
                 }
             }
-            (b_off, result)
+            Ok(())
         }
     }
 }

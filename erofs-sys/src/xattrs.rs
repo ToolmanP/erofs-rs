@@ -145,15 +145,16 @@ impl<'a> XAttrsEntryProvider for SkippableContinousIter<'a> {
             }
             0
         };
-        let (ncmps, result) = self.cmp_with_buf(&name[n_off..]);
-
-        if !result {
-            self.skip(skip_off - ncmps as Off);
-        } else {
-            self.fill_xattr_value(&mut buffer[..header.value_len as usize])
+        match self.try_cmp(&name[n_off..]) {
+            Ok(()) => {
+                self.fill_xattr_value(&mut buffer[..header.value_len as usize]);
+                true
+            }
+            Err(off) => {
+                self.skip(skip_off - off as Off);
+                false
+            }
         }
-
-        result
     }
 
     fn fill_xattr_value(&mut self, data: &mut [u8]) {
