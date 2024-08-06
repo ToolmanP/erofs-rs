@@ -1,6 +1,8 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-only
 
+/// On-disk Directory Descriptor Format for EROFS
+/// Documented on [EROFS Directory](https://erofs.docs.kernel.org/en/latest/core_ondisk.html#directories)
 #[repr(C, packed)]
 pub(crate) struct DirentDesc {
     pub(crate) nid: u64,
@@ -9,11 +11,14 @@ pub(crate) struct DirentDesc {
     pub(crate) reserved: u8,
 }
 
+/// In memory representation of a real directory entry.
 pub(crate) struct Dirent<'a> {
     pub(crate) desc: &'a DirentDesc,
     pub(crate) name: &'a [u8],
 }
 
+/// Create a collection of directory entries from a buffer.
+/// This is a helper struct to iterate over directory entries.
 pub(crate) struct DirCollection<'a> {
     data: &'a [u8],
     offset: usize,
