@@ -96,8 +96,9 @@ mod tests {
     impl Source for MmapMut {
         fn fill(&self, data: &mut [u8], offset: Off) -> SourceResult<u64> {
             self.as_buf(offset, data.len() as u64).map(|buf| {
-                data.clone_from_slice(buf.content());
-                buf.content().len() as u64
+                let len = buf.content().len();
+                data[..len].clone_from_slice(buf.content());
+                len as Off
             })
         }
     }
@@ -105,12 +106,12 @@ mod tests {
     impl<'a> PageSource<'a> for MmapMut {
         fn as_buf(&'a self, offset: crate::Off, len: crate::Off) -> SourceResult<RefBuffer<'a>> {
             let pa = PageAddress::from(offset);
-            if pa.pg_off + len > EROFS_BLOCK_SZ {
+            if pa.pg_off + len > EROFS_PAGE_SZ {
                 Err(SourceError::OutBound)
             } else {
                 let rlen = len.min(self.len() as u64 - offset);
                 let buf =
-                    &self[(pa.page as usize)..self.len().min((pa.page + EROFS_BLOCK_SZ) as usize)];
+                    &self[(pa.page as usize)..self.len().min((pa.page + EROFS_PAGE_SZ) as usize)];
                 Ok(RefBuffer::new(buf, pa.pg_off as usize, rlen as usize))
             }
         }
@@ -118,12 +119,12 @@ mod tests {
         fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> SourceResult<RefBufferMut<'a>> {
             let pa = PageAddress::from(offset);
             let maxsize = self.len();
-            if pa.pg_off + len > EROFS_BLOCK_SZ {
+            if pa.pg_off + len > EROFS_PAGE_SZ {
                 Err(SourceError::OutBound)
             } else {
                 let rlen = len.min(self.len() as u64 - offset);
                 let buf =
-                    &mut self[(pa.page as usize)..maxsize.min((pa.page + EROFS_BLOCK_SZ) as usize)];
+                    &mut self[(pa.page as usize)..maxsize.min((pa.page + EROFS_PAGE_SZ) as usize)];
                 Ok(RefBufferMut::new(
                     buf,
                     pa.pg_off as usize,
@@ -136,13 +137,15 @@ mod tests {
 
     #[test]
     fn test_uncompressed_mmap_filesystem() {
-        let file = load_fixture();
-        let mut sbi: SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>> = SuperblockInfo::new(
-            Box::new(MemFileSystem::new(UncompressedBackend::new(unsafe {
-                MmapMut::map_mut(&file).unwrap()
-            }))),
-            HashMap::new(),
-        );
-        test_filesystem(&mut sbi);
+        for file in load_fixtures() {
+            let mut sbi: SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>> =
+                SuperblockInfo::new(
+                    Box::new(MemFileSystem::new(UncompressedBackend::new(unsafe {
+                        MmapMut::map_mut(&file).unwrap()
+                    }))),
+                    HashMap::new(),
+                );
+            test_filesystem(&mut sbi);
+        }
     }
 }

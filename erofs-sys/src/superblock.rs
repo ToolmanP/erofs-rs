@@ -119,14 +119,14 @@ where
     //
     fn read_inode_xattrs_index(&self, nid: Nid) -> xattrs::MemEntryIndexHeader {
         let offset = self.iloc(nid);
+        let pa = PageAddress::from(offset);
 
-        let len = EROFS_BLOCK_SZ - self.blkoff(offset);
-        let mut buf = EROFS_EMPTY_BLOCK;
+        let mut buf = EROFS_PAGE;
         let mut indexes: Vec<u32> = Vec::new();
 
         let rlen = self
             .backend()
-            .fill(&mut buf[0..len as usize], offset)
+            .fill(&mut buf[0..pa.pg_len as usize], offset)
             .unwrap();
 
         let header: xattrs::DiskEntryIndexHeader =
@@ -137,7 +137,7 @@ where
 
         extend_from_slice(&mut indexes, unsafe {
             core::slice::from_raw_parts(
-                (buf[xattrs::XATTRS_HEADER_SIZE as usize..len as usize])
+                (buf[xattrs::XATTRS_HEADER_SIZE as usize..pa.pg_len as usize])
                     .as_ptr()
                     .cast(),
                 inline_count,
@@ -151,7 +151,7 @@ where
             }
         } else {
             for block in self.continous_iter(
-                round!(UP, offset, EROFS_BLOCK_SZ),
+                round!(UP, offset, EROFS_PAGE_SZ),
                 (outbound_count << 2) as Off,
             ) {
                 let data = block.content();
@@ -177,9 +177,8 @@ where
         };
 
         let lastblk = if inline { nblocks - 1 } else { nblocks };
-
+        let len = inode.info().file_size() - offset;
         if offset < self.blkpos(lastblk) {
-            let len = self.blkpos(lastblk) - offset;
             Map {
                 logical: AddressMap { start: offset, len },
                 physical: AddressMap {
@@ -190,25 +189,22 @@ where
                 device_id: 0,
                 flags: MAP_MAPPED,
             }
-        } else {
-            let len = inode.info().file_size() - offset;
-            if inline {
-                Map {
-                    logical: AddressMap { start: offset, len },
-                    physical: AddressMap {
-                        start: self.iloc(inode.nid())
-                            + inode.info().inode_size()
-                            + inode.info().xattr_size()
-                            + self.blkoff(offset),
-                        len,
-                    },
-                    algorithm_format: 0,
-                    device_id: 0,
-                    flags: MAP_MAPPED,
-                }
-            } else {
-                unimplemented!()
+        } else if inline {
+            Map {
+                logical: AddressMap { start: offset, len },
+                physical: AddressMap {
+                    start: self.iloc(inode.nid())
+                        + inode.info().inode_size()
+                        + inode.info().xattr_size()
+                        + self.blkoff(offset),
+                    len,
+                },
+                algorithm_format: 0,
+                device_id: 0,
+                flags: MAP_MAPPED,
             }
+        } else {
+            unimplemented!()
         }
     }
 
@@ -456,25 +452,34 @@ where
 pub(crate) mod tests {
     extern crate std;
 
+    use alloc::string::ToString;
+
     use super::*;
     use crate::inode::tests::*;
     use crate::operations::*;
     use hex_literal::hex;
     use sha2::{Digest, Sha512};
     use std::collections::HashMap;
+    use std::format;
     use std::fs::File;
     use std::path::Path;
+    use std::vec;
 
     pub(crate) const SB_MAGIC: u32 = 0xE0F5E1E2;
 
     pub(crate) type SimpleBufferedFileSystem =
         SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>>;
 
-    pub(crate) fn load_fixture() -> File {
-        let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/sample.img"));
-        let file = File::options().read(true).write(true).open(path);
-        assert!(file.is_ok());
-        file.unwrap()
+    pub(crate) fn load_fixtures() -> impl Iterator<Item = File> {
+        vec![512,1024,2048,4096].into_iter().map(|num| {
+            let mut s = env!("CARGO_MANIFEST_DIR").to_string();
+            s.push_str(&format!("/tests/sample_{num}.img"));
+            File::options()
+                .read(true)
+                .write(true)
+                .open(Path::new(&s))
+                .unwrap()
+        })
     }
 
     fn test_superblock_def(sbi: &mut SimpleBufferedFileSystem) {
@@ -483,11 +488,9 @@ pub(crate) mod tests {
 
     fn test_filesystem_ilookup(sbi: &mut SimpleBufferedFileSystem) {
         const LIPSUM_HEX: [u8;64] = hex!("6846740fd4c03c86524d39e0012ec8eb1e4b87e8a90c65227904148bc0e4d0592c209151a736946133cd57f7ec59c4e8a445e7732322dda9ce356f8d0100c4ca");
-        const LIPSUM_NID: u64 = 640;
         const LIPSUM_FILE_SIZE: u64 = 5060;
         const LIPSUM_TYPE: Type = Type::Regular;
         let inode = ilookup(&*sbi.filesystem, &mut sbi.inodes, "/texts/lipsum.txt").unwrap();
-        assert_eq!(inode.nid(), LIPSUM_NID);
         assert_eq!(inode.info().inode_type(), LIPSUM_TYPE);
         assert_eq!(inode.info().file_size(), LIPSUM_FILE_SIZE);
 
@@ -501,11 +504,9 @@ pub(crate) mod tests {
 
     fn test_continous_iter(sbi: &mut SimpleBufferedFileSystem) {
         const README_HEX: [u8; 64] = hex!("99fffc75aec028f417d9782fffed6c5d877a29ad1b16fc62bfeb168cdaf8db6db2bad1814904cd0fa18a2396c2c618041682a010601f4052b9895138d4ed6f16");
-        const README_NID: u64 = 44;
         const README_FILE_SIZE: u64 = 38;
         const README_TYPE: Type = Type::Regular;
         let inode = ilookup(&*sbi.filesystem, &mut sbi.inodes, "/README.md").unwrap();
-        assert_eq!(inode.nid(), README_NID);
         assert_eq!(inode.info().inode_type(), README_TYPE);
         assert_eq!(inode.info().file_size(), README_FILE_SIZE);
         let map = sbi.filesystem.map(inode, 0);

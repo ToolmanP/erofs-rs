@@ -32,7 +32,7 @@ pub(crate) type BackendResult<T> = Result<T, BackendError>;
 pub(crate) trait Source {
     fn fill(&self, data: &mut [u8], offset: Off) -> SourceResult<u64>;
     fn get_temp_buffer(&self, offset: Off, maxsize: Off) -> SourceResult<TempBuffer> {
-        let mut block: Block = EROFS_EMPTY_BLOCK;
+        let mut block: Page = EROFS_PAGE;
         let pa = PageAddress::from(offset);
         self.fill(&mut block, pa.page)
             .map(|sz| TempBuffer::new(block, pa.pg_off as usize, sz.min(maxsize) as usize))
@@ -60,7 +60,7 @@ pub(crate) trait MemoryBackend<'a>: Backend {
 }
 
 pub(crate) struct TempBuffer {
-    block: Block,
+    block: Page,
     start: usize,
     maxsize: usize,
 }
@@ -77,7 +77,7 @@ pub(crate) trait BufferMut: Buffer {
 }
 
 impl TempBuffer {
-    pub(crate) fn new(block: Block, start: usize, maxsize: usize) -> Self {
+    pub(crate) fn new(block: Page, start: usize, maxsize: usize) -> Self {
         Self {
             block,
             start,
@@ -86,7 +86,7 @@ impl TempBuffer {
     }
     pub(crate) const fn empty() -> Self {
         Self {
-            block: EROFS_EMPTY_BLOCK,
+            block: EROFS_PAGE,
             start: 0,
             maxsize: 0,
         }
@@ -212,8 +212,12 @@ where
         if self.offset >= self.len {
             None
         } else {
-            let m = self.sbi.map(self.inode, self.offset);
-            self.offset += m.logical.len.min(EROFS_BLOCK_SZ);
+            let mut m = self.sbi.map(self.inode, self.offset);
+            let pa = PageAddress::from(m.physical.start);
+            let len = m.physical.len.min(pa.pg_len);
+            m.physical.len = len;
+            m.logical.len = len;
+            self.offset += len;
             Some(m)
         }
     }
@@ -252,8 +256,8 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         match self.map_iter.next() {
             Some(m) => {
-                if m.logical.len < EROFS_BLOCK_SZ as Off {
-                    let mut block = EROFS_EMPTY_BLOCK;
+                if m.logical.len < EROFS_PAGE_SZ as Off {
+                    let mut block = EROFS_PAGE;
                     match self
                         .backend
                         .fill(&mut block[0..m.physical.len as usize], m.physical.start)
@@ -316,7 +320,7 @@ where
         match self.map_iter.next() {
             Some(m) => match self
                 .backend
-                .as_buf(m.physical.start, m.physical.len.min(EROFS_BLOCK_SZ))
+                .as_buf(m.physical.start, m.physical.len.min(EROFS_PAGE_SZ))
             {
                 Ok(buf) => Some(heap_alloc(buf)),
                 Err(_) => None,
@@ -481,7 +485,7 @@ impl<'a> Iterator for MetadataBufferIter<'a> {
         if self.buffer.start == self.buffer.maxsize {
             self.buffer = self
                 .backend
-                .get_temp_buffer(self.offset, EROFS_BLOCK_SZ)
+                .get_temp_buffer(self.offset, EROFS_PAGE_SZ)
                 .unwrap();
             self.offset += self.buffer.maxsize as Off;
         }
