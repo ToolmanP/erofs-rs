@@ -471,7 +471,7 @@ pub(crate) mod tests {
         SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>>;
 
     pub(crate) fn load_fixtures() -> impl Iterator<Item = File> {
-        vec![512,1024,2048,4096].into_iter().map(|num| {
+        vec![512, 1024, 2048, 4096].into_iter().map(|num| {
             let mut s = env!("CARGO_MANIFEST_DIR").to_string();
             s.push_str(&format!("/tests/sample_{num}.img"));
             File::options()
