@@ -6,11 +6,11 @@
 //! A pure Rust implementation of the EROFS filesystem.
 //! Technical Details are documented in the [EROFS Documentation](https://erofs.docs.kernel.org/en/latest/)
 
-pub(crate) const EROFS_BLOCK_SZ: u64 = 4096;
-pub(crate) const EROFS_EMPTY_BLOCK: Block = [0; EROFS_BLOCK_SZ as usize];
+pub(crate) const EROFS_PAGE_SZ: u64 = 4096;
+pub(crate) const EROFS_PAGE: Page = [0; EROFS_PAGE_SZ as usize];
 pub(crate) const EROFS_SUPER_OFFSET: Off = 1024;
-pub(crate) const EROFS_BLOCK_BITS: u64 = 12;
-pub(crate) const EROFS_BLOCK_MASK: u64 = EROFS_BLOCK_SZ - 1;
+pub(crate) const EROFS_PAGE_BITS: u64 = 12;
+pub(crate) const EROFS_PAGE_MASK: u64 = EROFS_PAGE_SZ - 1;
 
 pub(crate) struct PageAddress {
     pub(crate) page: u64,
@@ -22,10 +22,10 @@ pub(crate) struct PageAddress {
 impl From<u64> for PageAddress {
     fn from(address: u64) -> Self {
         PageAddress {
-            page: (address >> EROFS_BLOCK_BITS) << EROFS_BLOCK_BITS,
-            pg_index: address >> EROFS_BLOCK_BITS,
-            pg_off: address & EROFS_BLOCK_MASK,
-            pg_len: EROFS_BLOCK_SZ - (address & EROFS_BLOCK_MASK),
+            page: (address >> EROFS_PAGE_BITS) << EROFS_PAGE_BITS,
+            pg_index: address >> EROFS_PAGE_BITS,
+            pg_off: address & EROFS_PAGE_MASK,
+            pg_len: EROFS_PAGE_SZ - (address & EROFS_PAGE_MASK),
         }
     }
 }
@@ -37,7 +37,7 @@ impl From<u64> for PageAddress {
 extern crate alloc;
 
 /// Erofs Operates on the block/page size of 4096 we respect that.
-pub(crate) type Block = [u8; EROFS_BLOCK_SZ as usize];
+pub(crate) type Page = [u8; EROFS_PAGE_SZ as usize];
 /// Erofs requires block index to a 32 bit unsigned integer.
 pub(crate) type Blk = u32;
 /// Erofs requires normal offset to be a 64bit unsigned integer.
