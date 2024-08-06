@@ -1,12 +1,9 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-only
 
-use alloc::boxed::Box;
-use core::mem::{size_of, MaybeUninit};
-
-use super::alloc_helper::*;
 use super::superblock::*;
 use super::*;
+use core::mem::size_of;
 
 /// Represents the compact bitfield of the Erofs Inode format.
 #[repr(transparent)]
@@ -15,6 +12,7 @@ pub(crate) struct Format(u16);
 
 /// The Version of the Inode which represents whether this inode is extended or compact.
 /// Extended inodes have more infos about nlinks + mtime.
+/// This is documented in https://erofs.docs.kernel.org/en/latest/core_ondisk.html#inodes
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(crate) enum Version {
@@ -50,7 +48,8 @@ pub(crate) enum Type {
     Unknown,
 }
 
-/// This is format extracted from the
+/// This is format extracted from i_format bit representation.
+/// This includes various infos and specs about the inode.
 impl Format {
     pub(crate) fn version(&self) -> Version {
         match (self.0) & ((1 << 1) - 1) {
@@ -72,6 +71,8 @@ impl Format {
     }
 }
 
+/// Represents the compact inode which resides on-disk.
+/// This is documented in https://erofs.docs.kernel.org/en/latest/core_ondisk.html#inodes
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(crate) struct CompactInodeInfo {
@@ -88,6 +89,8 @@ pub(crate) struct CompactInodeInfo {
     pub(crate) i_reserved2: [u8; 4],
 }
 
+/// Represents the extended inode which resides on-disk.
+/// This is documented in https://erofs.docs.kernel.org/en/latest/core_ondisk.html#inodes
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(crate) struct ExtendedInodeInfo {
@@ -106,6 +109,7 @@ pub(crate) struct ExtendedInodeInfo {
     pub(crate) i_reserved2: [u8; 16],
 }
 
+/// Represents the inode info which is either compact or extended.
 #[derive(Clone, Copy)]
 pub(crate) enum InodeInfo {
     Extended(ExtendedInodeInfo),
@@ -115,6 +119,7 @@ pub(crate) enum InodeInfo {
 pub(crate) const CHUNK_BLKBITS_MASK: u16 = 0x1f;
 pub(crate) const CHUNK_FORMAT_INDEXES: u16 = 0x20;
 
+/// Represents on-disk chunk index of the file backing inode.
 #[repr(C)]
 pub(crate) struct ChunkIndex {
     pub(crate) advise: u16,
@@ -135,12 +140,14 @@ impl From<[u8; 8]> for ChunkIndex {
     }
 }
 
+/// Represents the data spec of the inode which is either consequentive raw blocks or in sparse chunk format.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum DataSpec {
     RawBlk(u32),
     ChunkFormat(u16),
 }
 
+/// Represents the inode spec which is either data or device.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Spec {
     Data(DataSpec),
@@ -148,6 +155,7 @@ pub(crate) enum Spec {
     Unknown,
 }
 
+/// Convert the spec from the format of the inode based on the layout.
 impl Spec {
     pub(crate) fn data(u: &[u8; 4], layout: Layout) -> Self {
         match layout {
@@ -163,6 +171,7 @@ impl Spec {
     }
 }
 
+/// Helper functions for Inode Info.
 impl InodeInfo {
     pub(crate) fn ino(&self) -> u32 {
         match self {
@@ -304,21 +313,8 @@ impl TryFrom<InodeInfoBuf> for InodeInfo {
     }
 }
 
-pub(crate) struct InodeInitParam {
-    pub(crate) nid: Nid,
-    pub(crate) info: InodeInfo,
-    pub(crate) xattr_header: xattrs::MemEntryIndexHeader,
-}
-
 pub(crate) trait InodeCollection {
     type I: Inode + Sized;
-
-    // Design Pattern:
-    // In ilocked_get5 the inode will go through the late init phase;
-    // we mimic this correspondingly;
-    fn new_uninit_raw() -> Box<MaybeUninit<Self::I>> {
-        heap_alloc(MaybeUninit::<Self::I>::uninit())
-    }
 
     fn iget(&mut self, nid: Nid, filesystem: &dyn FileSystem<Self::I>) -> &mut Self::I;
 }
