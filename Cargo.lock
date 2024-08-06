@@ -47,6 +47,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dump"
+version = "0.1.0"
+
+[[package]]
 name = "erofs-sys"
 version = "0.1.0"
 dependencies = [

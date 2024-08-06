@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["erofs-sys", "mkfs"]
+members = [ "dump","erofs-sys", "mkfs"]
