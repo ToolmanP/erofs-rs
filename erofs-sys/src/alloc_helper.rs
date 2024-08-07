@@ -46,3 +46,12 @@ pub(crate) fn heap_alloc<T>(value: T) -> Box<T> {
         () => Box::new(value),
     }
 }
+
+pub(crate) fn vec_with_capacity<T>(capacity: usize) -> Vec<T> {
+    match () {
+        #[cfg(CONFIG_EROFS_FS = "y")]
+        () => Vec::with_capacity(capacity, GFP_KERNEL).unwrap(),
+        #[cfg(not(CONFIG_EROFS_FS = "y"))]
+        () => Vec::with_capacity(capacity),
+    }
+}
