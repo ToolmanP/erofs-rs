@@ -6,6 +6,8 @@ use super::*;
 
 use alloc::vec::Vec;
 
+/// The header of the xattr entry index.
+/// This is used to describe the superblock's xattrs collection.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub(crate) struct DiskEntryIndexHeader {
@@ -22,11 +24,14 @@ impl From<[u8; 12]> for DiskEntryIndexHeader {
 
 pub(crate) const XATTRS_HEADER_SIZE: u64 = core::mem::size_of::<DiskEntryIndexHeader>() as u64;
 
+/// Represented as a inmemory memory entry index header used by SuperBlockInfo.
 pub(crate) struct MemEntryIndexHeader {
     pub(crate) name_filter: u32,
     pub(crate) shared_indexes: Vec<u32>,
 }
 
+/// This is on-disk representation of xattrs entry header.
+/// This is used to describe one extended attribute.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(crate) struct EntryHeader {
@@ -41,6 +46,7 @@ impl From<[u8; 4]> for EntryHeader {
     }
 }
 
+/// This is real index data of the xattrs entry index.
 pub(crate) struct Prefix(pub(crate) Vec<u8>);
 
 impl Prefix {
@@ -76,6 +82,7 @@ macro_rules! static_cstr {
     };
 }
 
+/// Supported xattr prefixes
 pub(crate) const EROFS_XATTRS_PREFIXS: [(&str, usize); 7] = [
     ("", 0),
     ("user.", 5),
@@ -86,6 +93,8 @@ pub(crate) const EROFS_XATTRS_PREFIXS: [(&str, usize); 7] = [
     ("security.", 9),
 ];
 
+/// An iterator to read xattrs by comparing the entry's name one by one and reads its value
+/// correspondingly.
 impl<'a> XAttrsEntryProvider for SkippableContinousIter<'a> {
     fn get_entry_header(&mut self) -> EntryHeader {
         let mut buf: [u8; 4] = [0; 4];

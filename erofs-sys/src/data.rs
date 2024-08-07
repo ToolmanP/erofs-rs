@@ -1,6 +1,5 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-only
-
 pub(crate) mod uncompressed;
 
 use alloc::boxed::Box;
@@ -29,6 +28,8 @@ pub(crate) enum BackendError {
 pub(crate) type SourceResult<T> = Result<T, SourceError>;
 pub(crate) type BackendResult<T> = Result<T, BackendError>;
 
+/// Represent some sort of generic data source. This cound be file, memory or even network.
+/// Note that users should never use this directly please use backends instead.
 pub(crate) trait Source {
     fn fill(&self, data: &mut [u8], offset: Off) -> SourceResult<u64>;
     fn get_temp_buffer(&self, offset: Off, maxsize: Off) -> SourceResult<TempBuffer> {
@@ -39,32 +40,44 @@ pub(crate) trait Source {
     }
 }
 
+/// Represents a file source.
 pub(crate) trait FileSource: Source {}
 
-// This only allocates with in a page.
+// Represents a memory source. Note that as_buf and as_buf_mut should only represent memory within
+// a page. Cross page memory is not supported and treated as an error.
 pub(crate) trait PageSource<'a>: Source {
     fn as_buf(&'a self, offset: Off, len: Off) -> SourceResult<RefBuffer<'a>>;
     fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> SourceResult<RefBufferMut<'a>>;
 }
 
+/// Represents a generic data access backend that is backed by some sort of data source.
+/// This often has temporary buffers to decompress the data from the data source.
+/// The method signatures are the same as those of the Source trait.
 pub(crate) trait Backend {
     fn fill(&self, data: &mut [u8], offset: Off) -> BackendResult<u64>;
     fn get_temp_buffer(&self, offset: Off, maxsize: Off) -> BackendResult<TempBuffer>;
 }
 
+/// Represents a file backend whose source is a file.
 pub(crate) trait FileBackend: Backend {}
 
+/// Represents a memory backend whose source is memory.
 pub(crate) trait MemoryBackend<'a>: Backend {
     fn as_buf(&'a self, offset: Off, len: Off) -> BackendResult<RefBuffer<'a>>;
     fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> BackendResult<RefBufferMut<'a>>;
 }
 
+/// Represents a TempBuffer which owns a temporary on-stack/on-heap buffer.
+/// Note that file or network backend can only use this since they can't access the data from the
+/// memory directly.
 pub(crate) struct TempBuffer {
     block: Page,
     start: usize,
     maxsize: usize,
 }
 
+/// Represents a buffer trait which can yield its internal reference or be casted as an iterator of
+/// DirEntries.
 pub(crate) trait Buffer {
     fn content(&self) -> &[u8];
     fn iter_dir(&self) -> DirCollection<'_> {
@@ -72,6 +85,7 @@ pub(crate) trait Buffer {
     }
 }
 
+/// Represents a mutable buffer trait which can yield its internal mutable reference.
 pub(crate) trait BufferMut: Buffer {
     fn content_mut(&mut self) -> &mut [u8];
 }
@@ -105,6 +119,8 @@ impl BufferMut for TempBuffer {
     }
 }
 
+/// Represents a buffer that holds a reference to a slice of data that
+/// is borrowed from the thin air.
 pub(crate) struct RefBuffer<'a> {
     buf: &'a [u8],
     start: usize,
@@ -152,6 +168,8 @@ impl<'a> Drop for RefBuffer<'a> {
     }
 }
 
+/// Represents a mutable buffer that holds a reference to a slice of data
+/// that is borrowed from the thin air.
 pub(crate) struct RefBufferMut<'a> {
     buf: &'a mut [u8],
     start: usize,
@@ -193,6 +211,7 @@ impl<'a> Drop for RefBufferMut<'a> {
     }
 }
 
+/// Iterates over the data map represented by an inode.
 pub(crate) struct MapIter<'a, 'b, FS, I>
 where
     FS: FileSystem<I>,
@@ -426,6 +445,8 @@ where
     }
 }
 
+/// Represents a basic iterator over a range of bytes from data backends.
+/// Note that this is skippable and can be used to move the iterator's cursor forward.
 pub(crate) trait ContinousBufferIter<'a>: Iterator<Item = Box<dyn Buffer + 'a>> {
     fn advance_off(&mut self, offset: Off);
 }
@@ -474,6 +495,9 @@ where
     }
 }
 
+/// This is used as a iterator to read the metadata buffer. The metadata buffer is a continous 4
+/// bytes aligned collection of integers. This is used primarily when reading an inode's xattrs
+/// indexe.
 pub(crate) struct MetadataBufferIter<'a> {
     backend: &'a dyn Backend,
     buffer: TempBuffer,
@@ -517,6 +541,8 @@ impl<'a> Iterator for MetadataBufferIter<'a> {
     }
 }
 
+/// Represents a skippable continuous buffer iterator. This is used primarily for reading the
+/// extended attributes. Since the key-value is flattened out in its original format.
 pub(crate) struct SkippableContinousIter<'a> {
     iter: Box<dyn ContinousBufferIter<'a> + 'a>,
     data: Box<dyn Buffer + 'a>,
