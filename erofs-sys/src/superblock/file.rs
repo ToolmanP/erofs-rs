@@ -5,7 +5,7 @@ use self::operations::get_xattr_prefixes;
 
 use super::*;
 
-pub(crate) struct RawFileSystem<B>
+pub(crate) struct ImageFileSystem<B>
 // Only support standard file/device io. Not a continguous region of memory.
 where
     B: FileBackend,
@@ -16,7 +16,7 @@ where
     device_info: DeviceInfo,
 }
 
-impl<I, B> FileSystem<I> for RawFileSystem<B>
+impl<I, B> FileSystem<I> for ImageFileSystem<B>
 where
     B: FileBackend,
     I: Inode,
@@ -53,7 +53,7 @@ where
     }
 }
 
-impl<T> RawFileSystem<T>
+impl<T> ImageFileSystem<T>
 where
     T: FileBackend,
 {
@@ -105,7 +105,7 @@ mod tests {
         for file in load_fixtures() {
             let mut sbi: SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>> =
                 SuperblockInfo::new(
-                    Box::new(RawFileSystem::new(UncompressedBackend::new(file))),
+                    Box::new(ImageFileSystem::new(UncompressedBackend::new(file))),
                     HashMap::new(),
                 );
             test_filesystem(&mut sbi);
