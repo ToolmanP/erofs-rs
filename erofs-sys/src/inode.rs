@@ -24,7 +24,7 @@ pub(crate) enum Version {
 /// Represents the data layout backed by the Inode.
 /// As Documented in https://erofs.docs.kernel.org/en/latest/core_ondisk.html#inode-data-layouts
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Layout {
     FlatPlain,
     CompressedFull,
