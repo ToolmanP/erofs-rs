@@ -112,7 +112,12 @@ mod tests {
                 let rlen = len.min(self.len() as u64 - offset);
                 let buf =
                     &self[(pa.page as usize)..self.len().min((pa.page + EROFS_PAGE_SZ) as usize)];
-                Ok(RefBuffer::new(buf, pa.pg_off as usize, rlen as usize))
+                Ok(RefBuffer::new(
+                    buf,
+                    pa.pg_off as usize,
+                    rlen as usize,
+                    |_| {},
+                ))
             }
         }
 

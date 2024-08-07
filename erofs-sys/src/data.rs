@@ -109,6 +109,7 @@ pub(crate) struct RefBuffer<'a> {
     buf: &'a [u8],
     start: usize,
     len: usize,
+    put_buf: fn(*mut core::ffi::c_void),
 }
 
 impl Buffer for [u8] {
@@ -130,8 +131,24 @@ impl<'a> Buffer for RefBuffer<'a> {
 }
 
 impl<'a> RefBuffer<'a> {
-    pub(crate) fn new(buf: &'a [u8], start: usize, len: usize) -> Self {
-        Self { buf, start, len }
+    pub(crate) fn new(
+        buf: &'a [u8],
+        start: usize,
+        len: usize,
+        put_buf: fn(*mut core::ffi::c_void),
+    ) -> Self {
+        Self {
+            buf,
+            start,
+            len,
+            put_buf,
+        }
+    }
+}
+
+impl<'a> Drop for RefBuffer<'a> {
+    fn drop(&mut self) {
+        (self.put_buf)(self.buf.as_ptr() as *mut core::ffi::c_void)
     }
 }
 
