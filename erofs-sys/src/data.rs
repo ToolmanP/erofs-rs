@@ -41,7 +41,7 @@ pub(crate) trait Source {
 
 pub(crate) trait FileSource: Source {}
 
-// This only allocates with in a
+// This only allocates with in a page.
 pub(crate) trait PageSource<'a>: Source {
     fn as_buf(&'a self, offset: Off, len: Off) -> SourceResult<RefBuffer<'a>>;
     fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> SourceResult<RefBufferMut<'a>>;
