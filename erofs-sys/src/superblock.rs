@@ -220,7 +220,7 @@ where
                 },
                 algorithm_format: 0,
                 device_id: 0,
-                flags: MAP_MAPPED,
+                flags: MAP_MAPPED | MAP_META
             }
         } else {
             unimplemented!()
