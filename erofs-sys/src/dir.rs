@@ -1,5 +1,5 @@
 // Copyright 2024 Yiyang Wu
-// SPDX-License-Identifier: MIT or GPL-2.0-only
+// SPDX-License-Identifier: MIT or GPL-2.0-later
 
 /// On-disk Directory Descriptor Format for EROFS
 /// Documented on [EROFS Directory](https://erofs.docs.kernel.org/en/latest/core_ondisk.html#directories)

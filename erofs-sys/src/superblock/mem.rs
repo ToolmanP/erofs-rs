@@ -1,5 +1,5 @@
 // Copyright 2024 Yiyang Wu
-// SPDX-License-Identifier: MIT or GPL-2.0-only
+// SPDX-License-Identifier: MIT or GPL-2.0-later
 
 use self::operations::get_xattr_prefixes;
 
@@ -105,13 +105,13 @@ mod tests {
 
     impl<'a> PageSource<'a> for MmapMut {
         fn as_buf(&'a self, offset: crate::Off, len: crate::Off) -> SourceResult<RefBuffer<'a>> {
-            let pa = PageAddress::from(offset);
+            let pa = PageAccessor::from(offset);
             if pa.pg_off + len > EROFS_PAGE_SZ {
                 Err(SourceError::OutBound)
             } else {
                 let rlen = len.min(self.len() as u64 - offset);
                 let buf =
-                    &self[(pa.page as usize)..self.len().min((pa.page + EROFS_PAGE_SZ) as usize)];
+                    &self[(pa.base as usize)..self.len().min((pa.base + EROFS_PAGE_SZ) as usize)];
                 Ok(RefBuffer::new(
                     buf,
                     pa.pg_off as usize,
@@ -122,14 +122,14 @@ mod tests {
         }
 
         fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> SourceResult<RefBufferMut<'a>> {
-            let pa = PageAddress::from(offset);
+            let pa = PageAccessor::from(offset);
             let maxsize = self.len();
             if pa.pg_off + len > EROFS_PAGE_SZ {
                 Err(SourceError::OutBound)
             } else {
                 let rlen = len.min(self.len() as u64 - offset);
                 let buf =
-                    &mut self[(pa.page as usize)..maxsize.min((pa.page + EROFS_PAGE_SZ) as usize)];
+                    &mut self[(pa.base as usize)..maxsize.min((pa.base + EROFS_PAGE_SZ) as usize)];
                 Ok(RefBufferMut::new(
                     buf,
                     pa.pg_off as usize,

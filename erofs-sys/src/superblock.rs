@@ -1,5 +1,5 @@
 // Copyright 2024 Yiyang Wu
-// SPDX-License-Identifier: MIT or GPL-2.0-only
+// SPDX-License-Identifier: MIT or GPL-2.0-later
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -93,6 +93,28 @@ impl From<[u8; 128]> for SuperBlock {
 pub(crate) type SuperBlockBuf = [u8; size_of::<SuperBlock>()];
 pub(crate) const SUPERBLOCK_EMPTY_BUF: SuperBlockBuf = [0; size_of::<SuperBlock>()];
 
+/// Used for external ondisk block buffer address calculation.
+pub(crate) struct BlockAccessor {
+    pub(crate) base: Off,
+    pub(crate) blk_index: Off,
+    pub(crate) blk_off: Off,
+    pub(crate) blk_len: Off,
+}
+
+impl BlockAccessor {
+    pub(crate) fn new(sb: &SuperBlock, address: Off) -> Self {
+        let bits = sb.blkszbits as Off;
+        let sz = 1 << bits;
+        let mask = sz - 1;
+        BlockAccessor {
+            base: (address >> bits) << bits,
+            blk_index: address >> bits,
+            blk_off: address & mask,
+            blk_len: sz - (address & mask),
+        }
+    }
+}
+
 pub(crate) trait FileSystem<I>
 where
     I: Inode,
@@ -138,7 +160,7 @@ where
     //
     fn read_inode_xattrs_index(&self, nid: Nid) -> xattrs::MemEntryIndexHeader {
         let offset = self.iloc(nid);
-        let pa = PageAddress::from(offset);
+        let pa = PageAccessor::from(offset);
 
         let mut buf = EROFS_PAGE;
         let mut indexes: Vec<u32> = Vec::new();
@@ -184,7 +206,7 @@ where
             }
         }
     }
-    fn flatmap(&self, inode: &I, offset: Off, inline: bool) -> Map {
+    fn flatmap(&self, inode: &I, offset: Off, inline: bool) -> MapResult {
         let nblocks = self.blk_round_up(inode.info().file_size());
 
         let blkaddr = match inode.info().spec() {
@@ -196,22 +218,23 @@ where
         };
 
         let lastblk = if inline { nblocks - 1 } else { nblocks };
+
         let len = inode.info().file_size() - offset;
         if offset < self.blkpos(lastblk) {
-            Map {
-                logical: AddressMap { start: offset, len },
-                physical: AddressMap {
+            Ok(Map {
+                logical: Segment { start: offset, len },
+                physical: Segment {
                     start: self.blkpos(blkaddr) + offset,
                     len,
                 },
                 algorithm_format: 0,
                 device_id: 0,
-                flags: MAP_MAPPED,
-            }
+                map_type: MapType::Normal,
+            })
         } else if inline {
-            Map {
-                logical: AddressMap { start: offset, len },
-                physical: AddressMap {
+            Ok(Map {
+                logical: Segment { start: offset, len },
+                physical: Segment {
                     start: self.iloc(inode.nid())
                         + inode.info().inode_size()
                         + inode.info().xattr_size()
@@ -220,14 +243,14 @@ where
                 },
                 algorithm_format: 0,
                 device_id: 0,
-                flags: MAP_MAPPED | MAP_META,
-            }
+                map_type: MapType::Meta,
+            })
         } else {
-            unimplemented!()
+            Err(MapError::OutofBound)
         }
     }
 
-    fn chunk_map(&self, inode: &I, offset: Off) -> Map {
+    fn chunk_map(&self, inode: &I, offset: Off) -> MapResult {
         let cs = match inode.info().spec() {
             Spec::Data(ds) => match ds {
                 DataSpec::ChunkFormat(cs) => cs,
@@ -253,21 +276,21 @@ where
             let chunk_index = ChunkIndex::from(buf);
 
             if chunk_index.blkaddr == u32::MAX {
-                Map::default()
+                Err(MapError::OutofBound)
             } else {
-                Map {
-                    logical: AddressMap {
+                Ok(Map {
+                    logical: Segment {
                         start: chunknr << chunkbits,
                         len: 1 << chunkbits,
                     },
-                    physical: AddressMap {
+                    physical: Segment {
                         start: self.blkpos(chunk_index.blkaddr),
                         len: 1 << chunkbits,
                     },
                     algorithm_format: 0,
                     device_id: chunk_index.device_id & self.device_info().mask,
-                    flags: MAP_MAPPED,
-                }
+                    map_type: MapType::Normal,
+                })
             }
         } else {
             let unit = 4;
@@ -283,26 +306,26 @@ where
             self.backend().fill(&mut buf, pos).unwrap();
             let blkaddr = u32::from_le_bytes(buf);
             if blkaddr == u32::MAX {
-                Map::default()
+                Err(MapError::OutofBound)
             } else {
-                Map {
-                    logical: AddressMap {
+                Ok(Map {
+                    logical: Segment {
                         start: chunknr << chunkbits,
                         len: 1 << chunkbits,
                     },
-                    physical: AddressMap {
+                    physical: Segment {
                         start: self.blkpos(blkaddr),
                         len: 1 << chunkbits,
                     },
                     algorithm_format: 0,
                     device_id: 0,
-                    flags: MAP_MAPPED,
-                }
+                    map_type: MapType::Normal,
+                })
             }
         }
     }
 
-    fn map(&self, inode: &I, offset: Off) -> Map {
+    fn map(&self, inode: &I, offset: Off) -> MapResult {
         match inode.info().format().layout() {
             Layout::FlatInline => self.flatmap(inode, offset, true),
             Layout::FlatPlain => self.flatmap(inode, offset, false),
@@ -528,7 +551,7 @@ pub(crate) mod tests {
         let inode = ilookup(&*sbi.filesystem, &mut sbi.inodes, "/README.md").unwrap();
         assert_eq!(inode.info().inode_type(), README_TYPE);
         assert_eq!(inode.info().file_size(), README_FILE_SIZE);
-        let map = sbi.filesystem.map(inode, 0);
+        let map = sbi.filesystem.map(inode, 0).unwrap();
 
         let mut hasher = Sha512::new();
         for block in sbi

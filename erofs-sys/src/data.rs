@@ -1,5 +1,5 @@
 // Copyright 2024 Yiyang Wu
-// SPDX-License-Identifier: MIT or GPL-2.0-only
+// SPDX-License-Identifier: MIT or GPL-2.0-later
 pub(crate) mod uncompressed;
 
 use alloc::boxed::Box;
@@ -34,8 +34,8 @@ pub(crate) trait Source {
     fn fill(&self, data: &mut [u8], offset: Off) -> SourceResult<u64>;
     fn get_temp_buffer(&self, offset: Off, maxsize: Off) -> SourceResult<TempBuffer> {
         let mut block: Page = EROFS_PAGE;
-        let pa = PageAddress::from(offset);
-        self.fill(&mut block, pa.page)
+        let pa = PageAccessor::from(offset);
+        self.fill(&mut block, pa.base)
             .map(|sz| TempBuffer::new(block, pa.pg_off as usize, sz.min(maxsize) as usize))
     }
 }
@@ -248,13 +248,18 @@ where
         if self.offset >= self.len {
             None
         } else {
-            let mut m = self.sbi.map(self.inode, self.offset);
-            let pa = PageAddress::from(m.physical.start);
-            let len = m.physical.len.min(pa.pg_len);
-            m.physical.len = len;
-            m.logical.len = len;
-            self.offset += len;
-            Some(m)
+            let result = self.sbi.map(self.inode, self.offset);
+            match result {
+                Ok(mut m) => {
+                    let ba = BlockAccessor::new(self.sbi.superblock(), m.physical.start);
+                    let len = m.physical.len.min(ba.blk_len);
+                    m.physical.len = len;
+                    m.logical.len = len;
+                    self.offset += len;
+                    Some(m)
+                }
+                Err(_) => None,
+            }
         }
     }
 }
@@ -471,7 +476,7 @@ where
             return None;
         }
 
-        let pa = PageAddress::from(self.offset);
+        let pa = PageAccessor::from(self.offset);
         let len = pa.pg_len.min(self.len);
         let result: Option<Self::Item> = self.backend.as_buf(self.offset, len).map_or_else(
             |_| None,

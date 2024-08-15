@@ -1,5 +1,5 @@
 // Copyright 2024 Yiyang Wu
-// SPDX-License-Identifier: MIT or GPL-2.0-only
+// SPDX-License-Identifier: MIT or GPL-2.0-later
 
 use super::*;
 
@@ -12,7 +12,7 @@ pub(crate) const MAP_PARTIAL_REF: u32 = 0x0020;
 
 #[derive(Debug, Default)]
 #[repr(C)]
-pub(crate) struct AddressMap {
+pub(crate) struct Segment {
     pub(crate) start: Off,
     pub(crate) len: Off,
 }
@@ -20,9 +20,23 @@ pub(crate) struct AddressMap {
 #[derive(Debug, Default)]
 #[repr(C)]
 pub(crate) struct Map {
-    pub(crate) logical: AddressMap,
-    pub(crate) physical: AddressMap,
+    pub(crate) logical: Segment,
+    pub(crate) physical: Segment,
     pub(crate) device_id: u16,
     pub(crate) algorithm_format: u16,
-    pub(crate) flags: u32,
+    pub(crate) map_type: MapType,
 }
+
+#[derive(Debug, Default)]
+pub(crate) enum MapType {
+    Meta,
+    #[default]
+    Normal,
+}
+
+#[derive(Debug)]
+pub(crate) enum MapError {
+    OutofBound,
+}
+
+pub(crate) type MapResult = Result<Map, MapError>;
