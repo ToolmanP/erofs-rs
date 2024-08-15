@@ -218,9 +218,8 @@ where
         };
 
         let lastblk = if inline { nblocks - 1 } else { nblocks };
-
-        let len = inode.info().file_size() - offset;
         if offset < self.blkpos(lastblk) {
+            let len = inode.info().file_size().min(self.blkpos(lastblk)) - offset;
             Ok(Map {
                 logical: Segment { start: offset, len },
                 physical: Segment {
@@ -232,6 +231,7 @@ where
                 map_type: MapType::Normal,
             })
         } else if inline {
+            let len = inode.info().file_size() - offset;
             Ok(Map {
                 logical: Segment { start: offset, len },
                 physical: Segment {
