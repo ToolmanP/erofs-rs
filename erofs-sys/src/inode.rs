@@ -26,12 +26,12 @@ pub(crate) enum Version {
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Layout {
-    FlatPlain,
-    CompressedFull,
-    FlatInline,
-    CompressedCompact,
-    Chunk,
-    Unknown,
+    FlatPlain = 0,
+    CompressedFull = 1,
+    FlatInline = 2,
+    CompressedCompact = 3,
+    Chunk = 4,
+    Unknown = 5
 }
 
 #[repr(C)]
