@@ -31,7 +31,7 @@ pub(crate) enum Layout {
     FlatInline = 2,
     CompressedCompact = 3,
     Chunk = 4,
-    Unknown = 5
+    Unknown = 5,
 }
 
 #[repr(C)]
