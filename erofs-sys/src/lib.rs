@@ -12,8 +12,6 @@
 #[cfg(not(CONFIG_EROFS_FS = "y"))]
 extern crate alloc;
 
-/// Erofs Operates on the block/page size of 4096 we respect that.
-pub(crate) type Page = [u8; EROFS_PAGE_SZ as usize];
 /// Erofs requires block index to a 32 bit unsigned integer.
 pub(crate) type Blk = u32;
 /// Erofs requires normal offset to be a 64bit unsigned integer.
@@ -21,27 +19,28 @@ pub(crate) type Off = u64;
 /// Erofs requires inode nid to be a 64bit unsigned integer.
 pub(crate) type Nid = u64;
 
-pub(crate) const EROFS_PAGE_SZ: Off = 4096;
-pub(crate) const EROFS_PAGE: Page = [0; EROFS_PAGE_SZ as usize];
 pub(crate) const EROFS_SUPER_OFFSET: Off = 1024;
-pub(crate) const EROFS_PAGE_BITS: Off = 12;
-pub(crate) const EROFS_PAGE_MASK: Off = EROFS_PAGE_SZ - 1;
+pub(crate) const EROFS_TEMP_BLOCK: TempBlock = [0; EROFS_TEMP_BLOCK_SZ as usize];
+pub(crate) const EROFS_TEMP_BLOCK_BITS: Off = 12;
+pub(crate) const EROFS_TEMP_BLOCK_SZ: Off = 1 << EROFS_TEMP_BLOCK_BITS;
+pub(crate) const EROFS_TEMP_BLOCK_MASK: Off = EROFS_TEMP_BLOCK_SZ - 1;
 
-/// Used for internal page buffer address calculation.
-pub(crate) struct PageAccessor {
+/// Erofs's maximum block is 4KB, so we use 4KB as the temp block size.
+pub(crate) type TempBlock = [u8; EROFS_TEMP_BLOCK_SZ as usize];
+
+/// Used for temp buffer address calculation
+pub(crate) struct TempBlockAccessor {
     pub(crate) base: Off,
-    pub(crate) pg_index: Off,
-    pub(crate) pg_off: Off,
-    pub(crate) pg_len: Off,
+    pub(crate) off: Off,
+    pub(crate) len: Off,
 }
 
-impl From<u64> for PageAccessor {
+impl From<u64> for TempBlockAccessor {
     fn from(address: Off) -> Self {
-        PageAccessor {
-            base: (address >> EROFS_PAGE_BITS) << EROFS_PAGE_BITS,
-            pg_index: address >> EROFS_PAGE_BITS,
-            pg_off: address & EROFS_PAGE_MASK,
-            pg_len: EROFS_PAGE_SZ - (address & EROFS_PAGE_MASK),
+        TempBlockAccessor {
+            base: (address >> EROFS_TEMP_BLOCK_BITS) << EROFS_TEMP_BLOCK_BITS,
+            off: address & EROFS_TEMP_BLOCK_MASK,
+            len: EROFS_TEMP_BLOCK_SZ - (address & EROFS_TEMP_BLOCK_MASK),
         }
     }
 }

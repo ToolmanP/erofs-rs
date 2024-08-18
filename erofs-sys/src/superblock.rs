@@ -1,5 +1,4 @@
-// Copyright 2024 Yiyang Wu
-// SPDX-License-Identifier: MIT or GPL-2.0-later
+// Copyright 2024 Yiyang Wu SPDX-License-Identifier: MIT or GPL-2.0-later
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -94,23 +93,21 @@ pub(crate) type SuperBlockBuf = [u8; size_of::<SuperBlock>()];
 pub(crate) const SUPERBLOCK_EMPTY_BUF: SuperBlockBuf = [0; size_of::<SuperBlock>()];
 
 /// Used for external ondisk block buffer address calculation.
-pub(crate) struct BlockAccessor {
+pub(crate) struct DiskBlockAccessor {
     pub(crate) base: Off,
-    pub(crate) blk_index: Off,
-    pub(crate) blk_off: Off,
-    pub(crate) blk_len: Off,
+    pub(crate) off: Off,
+    pub(crate) len: Off,
 }
 
-impl BlockAccessor {
+impl DiskBlockAccessor {
     pub(crate) fn new(sb: &SuperBlock, address: Off) -> Self {
         let bits = sb.blkszbits as Off;
         let sz = 1 << bits;
         let mask = sz - 1;
-        BlockAccessor {
+        DiskBlockAccessor {
             base: (address >> bits) << bits,
-            blk_index: address >> bits,
-            blk_off: address & mask,
-            blk_len: sz - (address & mask),
+            off: address & mask,
+            len: sz - (address & mask),
         }
     }
 }
@@ -160,25 +157,26 @@ where
     //
     fn read_inode_xattrs_index(&self, nid: Nid) -> xattrs::MemEntryIndexHeader {
         let offset = self.iloc(nid);
-        let pa = PageAccessor::from(offset);
+        let accessor = DiskBlockAccessor::new(self.superblock(), offset);
 
-        let mut buf = EROFS_PAGE;
+        let mut buf = EROFS_TEMP_BLOCK;
         let mut indexes: Vec<u32> = Vec::new();
 
         let rlen = self
             .backend()
-            .fill(&mut buf[0..pa.pg_len as usize], offset)
+            .fill(&mut buf[0..accessor.len as usize], offset)
             .unwrap();
 
         let header: xattrs::DiskEntryIndexHeader =
             unsafe { *(buf.as_ptr() as *const xattrs::DiskEntryIndexHeader) };
+
         let inline_count =
             (((rlen - xattrs::XATTRS_HEADER_SIZE) >> 2) as usize).min(header.shared_count as usize);
         let outbound_count = header.shared_count as usize - inline_count;
 
         extend_from_slice(&mut indexes, unsafe {
             core::slice::from_raw_parts(
-                (buf[xattrs::XATTRS_HEADER_SIZE as usize..pa.pg_len as usize])
+                (buf[xattrs::XATTRS_HEADER_SIZE as usize..accessor.len as usize])
                     .as_ptr()
                     .cast(),
                 inline_count,
@@ -192,7 +190,7 @@ where
             }
         } else {
             for block in self.continous_iter(
-                round!(UP, offset, EROFS_PAGE_SZ),
+                self.blkpos(self.blk_round_up(offset)),
                 (outbound_count << 2) as Off,
             ) {
                 let data = block.content();

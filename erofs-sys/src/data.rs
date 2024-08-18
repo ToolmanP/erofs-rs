@@ -1,5 +1,4 @@
-// Copyright 2024 Yiyang Wu
-// SPDX-License-Identifier: MIT or GPL-2.0-later
+// Copyright 2024 Yiyang Wu SPDX-License-Identifier: MIT or GPL-2.0-later
 pub(crate) mod uncompressed;
 
 use alloc::boxed::Box;
@@ -33,10 +32,10 @@ pub(crate) type BackendResult<T> = Result<T, BackendError>;
 pub(crate) trait Source {
     fn fill(&self, data: &mut [u8], offset: Off) -> SourceResult<u64>;
     fn get_temp_buffer(&self, offset: Off, maxsize: Off) -> SourceResult<TempBuffer> {
-        let mut block: Page = EROFS_PAGE;
-        let pa = PageAccessor::from(offset);
+        let mut block: TempBlock = EROFS_TEMP_BLOCK;
+        let pa = TempBlockAccessor::from(offset);
         self.fill(&mut block, pa.base)
-            .map(|sz| TempBuffer::new(block, pa.pg_off as usize, sz.min(maxsize) as usize))
+            .map(|sz| TempBuffer::new(block, pa.off as usize, sz.min(maxsize) as usize))
     }
 }
 
@@ -71,7 +70,7 @@ pub(crate) trait MemoryBackend<'a>: Backend {
 /// Note that file or network backend can only use this since they can't access the data from the
 /// memory directly.
 pub(crate) struct TempBuffer {
-    block: Page,
+    block: TempBlock,
     start: usize,
     maxsize: usize,
 }
@@ -91,7 +90,7 @@ pub(crate) trait BufferMut: Buffer {
 }
 
 impl TempBuffer {
-    pub(crate) fn new(block: Page, start: usize, maxsize: usize) -> Self {
+    pub(crate) fn new(block: TempBlock, start: usize, maxsize: usize) -> Self {
         Self {
             block,
             start,
@@ -100,7 +99,7 @@ impl TempBuffer {
     }
     pub(crate) const fn empty() -> Self {
         Self {
-            block: EROFS_PAGE,
+            block: EROFS_TEMP_BLOCK,
             start: 0,
             maxsize: 0,
         }
@@ -251,8 +250,8 @@ where
             let result = self.sbi.map(self.inode, self.offset);
             match result {
                 Ok(mut m) => {
-                    let ba = BlockAccessor::new(self.sbi.superblock(), m.physical.start);
-                    let len = m.physical.len.min(ba.blk_len);
+                    let ba = DiskBlockAccessor::new(self.sbi.superblock(), m.physical.start);
+                    let len = m.physical.len.min(ba.len);
                     m.physical.len = len;
                     m.logical.len = len;
                     self.offset += len;
@@ -297,8 +296,8 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         match self.map_iter.next() {
             Some(m) => {
-                if m.logical.len < EROFS_PAGE_SZ as Off {
-                    let mut block = EROFS_PAGE;
+                if m.logical.len < EROFS_TEMP_BLOCK_SZ as Off {
+                    let mut block = EROFS_TEMP_BLOCK;
                     match self
                         .backend
                         .fill(&mut block[0..m.physical.len as usize], m.physical.start)
@@ -361,7 +360,7 @@ where
         match self.map_iter.next() {
             Some(m) => match self
                 .backend
-                .as_buf(m.physical.start, m.physical.len.min(EROFS_PAGE_SZ))
+                .as_buf(m.physical.start, m.physical.len.min(EROFS_TEMP_BLOCK_SZ))
             {
                 Ok(buf) => Some(heap_alloc(buf)),
                 Err(_) => None,
@@ -476,8 +475,8 @@ where
             return None;
         }
 
-        let pa = PageAccessor::from(self.offset);
-        let len = pa.pg_len.min(self.len);
+        let pa = TempBlockAccessor::from(self.offset);
+        let len = pa.len.min(self.len);
         let result: Option<Self::Item> = self.backend.as_buf(self.offset, len).map_or_else(
             |_| None,
             |x| {
@@ -531,7 +530,7 @@ impl<'a> Iterator for MetadataBufferIter<'a> {
         if self.buffer.start == self.buffer.maxsize {
             self.buffer = self
                 .backend
-                .get_temp_buffer(self.offset, EROFS_PAGE_SZ)
+                .get_temp_buffer(self.offset, EROFS_TEMP_BLOCK_SZ)
                 .unwrap();
             self.offset += self.buffer.maxsize as Off;
         }

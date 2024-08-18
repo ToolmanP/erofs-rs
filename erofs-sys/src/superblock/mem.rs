@@ -105,38 +105,32 @@ mod tests {
 
     impl<'a> PageSource<'a> for MmapMut {
         fn as_buf(&'a self, offset: crate::Off, len: crate::Off) -> SourceResult<RefBuffer<'a>> {
-            let pa = PageAccessor::from(offset);
-            if pa.pg_off + len > EROFS_PAGE_SZ {
-                Err(SourceError::OutBound)
-            } else {
-                let rlen = len.min(self.len() as u64 - offset);
-                let buf =
-                    &self[(pa.base as usize)..self.len().min((pa.base + EROFS_PAGE_SZ) as usize)];
-                Ok(RefBuffer::new(
-                    buf,
-                    pa.pg_off as usize,
-                    rlen as usize,
-                    |_| {},
-                ))
-            }
+            let accessor = TempBlockAccessor::from(offset);
+            let maxsize = self.len();
+            let rlen = len.min(self.len() as u64 - offset);
+            let buf = &self[(accessor.base as usize)
+                ..maxsize.min((accessor.base + EROFS_TEMP_BLOCK_SZ) as usize)];
+
+            Ok(RefBuffer::new(
+                buf,
+                accessor.off as usize,
+                rlen as usize,
+                |_| {},
+            ))
         }
 
         fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> SourceResult<RefBufferMut<'a>> {
-            let pa = PageAccessor::from(offset);
+            let accessor = TempBlockAccessor::from(offset);
             let maxsize = self.len();
-            if pa.pg_off + len > EROFS_PAGE_SZ {
-                Err(SourceError::OutBound)
-            } else {
-                let rlen = len.min(self.len() as u64 - offset);
-                let buf =
-                    &mut self[(pa.base as usize)..maxsize.min((pa.base + EROFS_PAGE_SZ) as usize)];
-                Ok(RefBufferMut::new(
-                    buf,
-                    pa.pg_off as usize,
-                    rlen as usize,
-                    |_| {},
-                ))
-            }
+            let rlen = len.min(self.len() as u64 - offset);
+            let buf = &mut self[(accessor.base as usize)
+                ..maxsize.min((accessor.base + EROFS_TEMP_BLOCK_SZ) as usize)];
+            Ok(RefBufferMut::new(
+                buf,
+                accessor.off as usize,
+                rlen as usize,
+                |_| {},
+            ))
         }
     }
 
