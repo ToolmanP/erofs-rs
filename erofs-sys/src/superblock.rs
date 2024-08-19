@@ -564,7 +564,7 @@ pub(crate) mod tests {
             let mut sha512 = [0u8; 128];
             assert!(sbi
                 .filesystem
-                .get_xattr(inode, 1, b"user.sha512sum", &mut Some(&mut sha512))
+                .get_xattr(inode, 1, b"sha512sum", &mut Some(&mut sha512))
                 .unwrap()
                 .is_none());
 
@@ -572,7 +572,7 @@ pub(crate) mod tests {
 
             let sha512_vec = sbi
                 .filesystem
-                .get_xattr(inode, 1, b"user.sha512sum", &mut None)
+                .get_xattr(inode, 1, b"sha512sum", &mut None)
                 .unwrap()
                 .unwrap();
             assert_eq!(sha512_vec, README_SHA512_LITERAL);
@@ -582,14 +582,14 @@ pub(crate) mod tests {
             let mut sha512_hmac = [0u8; 128];
             assert!(sbi
                 .filesystem
-                .get_xattr(inode, 1, b"user.sha512hmac", &mut Some(&mut sha512_hmac))
+                .get_xattr(inode, 1, b"sha512hmac", &mut Some(&mut sha512_hmac))
                 .unwrap()
                 .is_none());
 
             assert_eq!(sha512_hmac, README_SHA512HMAC_LITERAL);
             let sha512_hmac_vec = sbi
                 .filesystem
-                .get_xattr(inode, 1, b"user.sha512hmac", &mut None)
+                .get_xattr(inode, 1, b"sha512hmac", &mut None)
                 .unwrap()
                 .unwrap();
             assert_eq!(sha512_hmac_vec, README_SHA512HMAC_LITERAL);
@@ -597,7 +597,7 @@ pub(crate) mod tests {
 
         assert!(sbi
             .filesystem
-            .get_xattr(inode, 1, b"user.notfound", &mut None)
+            .get_xattr(inode, 1, b"notfound", &mut None)
             .is_err_and(|x| x == XAttrError::NotFound));
     }
 

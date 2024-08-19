@@ -1,10 +1,10 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-later
 
-use crate::round;
 use super::alloc_helper::*;
 use super::data::*;
 use super::*;
+use crate::round;
 
 use alloc::vec::Vec;
 use core::mem::size_of;
@@ -218,36 +218,23 @@ impl<'a> XAttrEntriesProvider for SkippableContinousIter<'a> {
                 return Err(XAttrError::Invalid);
             }
 
-            let prefix = EROFS_XATTRS_PREFIXS[pf_index as usize];
-
-            let plen = prefix.len();
-
             if index != pf_index as u32
-                || name.len() != plen + ilen + header.suffix_len as usize
-                || name[..plen] != *prefix
-                || name[plen..plen + ilen] != *infix.name()
+                || name.len() != ilen + header.suffix_len as usize
+                || name[..ilen] != *infix.name()
             {
                 return Err(XAttrError::NotMatched);
             }
-
-            plen + ilen
+            ilen
         } else {
             let pf_index: usize = header.name_index.into();
             if pf_index >= EROFS_XATTRS_PREFIXS.len() {
                 return Err(XAttrError::Invalid);
             }
 
-            let prefix = EROFS_XATTRS_PREFIXS[pf_index];
-            let plen = prefix.len();
-
-            if pf_index != index as usize
-                || plen + header.suffix_len as usize != name.len()
-                || name[..plen] != *prefix
-            {
+            if pf_index != index as usize || header.suffix_len as usize != name.len() {
                 return Err(XAttrError::NotMatched);
             }
-
-            plen
+            0
         };
 
         match self.try_cmp(&name[cur..]) {
