@@ -397,9 +397,9 @@ where
             }
         }
 
-        for index in inode.xattrs_shared_entries().shared_indexes.iter() {
+        for entry_index in inode.xattrs_shared_entries().shared_indexes.iter() {
             let mut shared_provider = SkippableContinousIter::new(self.continous_iter(
-                self.blkpos(self.superblock().xattr_blkaddr) + (*index as Off) * 4,
+                self.blkpos(self.superblock().xattr_blkaddr) + (*entry_index as Off) * 4,
                 u64::MAX,
             ));
             let header = shared_provider.get_entry_header();
@@ -407,7 +407,7 @@ where
                 self.xattr_infixes(),
                 &header,
                 name,
-                *index,
+                index,
                 buffer,
             );
             if result.is_ok() {
@@ -593,6 +593,13 @@ pub(crate) mod tests {
                 .unwrap()
                 .unwrap();
             assert_eq!(sha512_hmac_vec, README_SHA512HMAC_LITERAL);
+        }
+
+        {
+            assert!(sbi
+                .filesystem
+                .get_xattr(inode, 6, b"selinux", &mut Some(&mut [0u8; 128]))
+                .is_ok())
         }
 
         assert!(sbi
