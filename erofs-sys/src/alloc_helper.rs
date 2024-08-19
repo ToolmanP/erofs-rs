@@ -9,6 +9,9 @@
 #[cfg(CONFIG_EROFS_FS = "y")]
 use kernel::prelude::*;
 
+#[cfg(not(CONFIG_EROFS_FS = "y"))]
+use alloc::vec;
+
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
@@ -47,11 +50,11 @@ pub(crate) fn heap_alloc<T>(value: T) -> Box<T> {
     }
 }
 
-pub(crate) fn vec_with_capacity<T>(capacity: usize) -> Vec<T> {
+pub(crate) fn vec_with_capacity<T: Default + Clone>(capacity: usize) -> Vec<T> {
     match () {
         #[cfg(CONFIG_EROFS_FS = "y")]
         () => Vec::with_capacity(capacity, GFP_KERNEL).unwrap(),
         #[cfg(not(CONFIG_EROFS_FS = "y"))]
-        () => Vec::with_capacity(capacity),
+        () => vec![Default::default(); capacity],
     }
 }
