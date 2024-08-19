@@ -7,7 +7,7 @@ use super::alloc_helper::*;
 use super::data::*;
 use super::inode::*;
 use super::superblock::*;
-use super::xattrs;
+use super::xattrs::*;
 use super::*;
 
 // Because of the brain dead features of borrow-checker, it cannot statically analyze which part of the struct is exclusively borrowed.
@@ -83,14 +83,14 @@ where
         .map(|nid| read_inode(filesystem, collection, nid))
 }
 
-pub(crate) fn get_xattr_prefixes(sb: &SuperBlock, backend: &dyn Backend) -> Vec<xattrs::Prefix> {
-    let mut result: Vec<xattrs::Prefix> = Vec::new();
+pub(crate) fn get_xattr_infixes(sb: &SuperBlock, backend: &dyn Backend) -> Vec<XAttrInfix> {
+    let mut result: Vec<XAttrInfix> = Vec::new();
     for data in MetadataBufferIter::new(
         backend,
         (sb.xattr_prefix_start << 2) as Off,
         sb.xattr_prefix_count as usize,
     ) {
-        push_vec(&mut result, xattrs::Prefix(data));
+        push_vec(&mut result, XAttrInfix(data));
     }
     result
 }

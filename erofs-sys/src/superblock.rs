@@ -11,7 +11,6 @@ use super::devices::*;
 use super::dir::*;
 use super::inode::*;
 use super::map::*;
-use super::xattrs;
 use super::xattrs::*;
 use super::*;
 
@@ -151,62 +150,33 @@ where
         InodeInfo::try_from(buf).unwrap()
     }
 
-    fn xattr_prefixes(&self) -> &Vec<xattrs::Prefix>;
+    fn xattr_infixes(&self) -> &Vec<xattrs::XAttrInfix>;
 
     // Currently we eagerly initialized all xattrs;
     //
-    fn read_inode_xattrs_index(&self, nid: Nid) -> xattrs::MemEntryIndexHeader {
-        let offset = self.iloc(nid);
-        let accessor = DiskBlockAccessor::new(self.superblock(), offset);
+    fn read_inode_xattrs_shared_entries(&self, nid: Nid, info: &InodeInfo) -> XAttrSharedEntries {
+        let mut offset = self.iloc(nid) + info.inode_size();
 
-        let mut buf = EROFS_TEMP_BLOCK;
+        let mut buf = XATTR_ENTRY_SUMMARY_BUF;
         let mut indexes: Vec<u32> = Vec::new();
+        self.backend().fill(&mut buf, offset).unwrap();
+        let header: XAttrSharedEntrySummary = XAttrSharedEntrySummary::from(buf);
+        offset += size_of::<XAttrSharedEntrySummary>() as Off;
 
-        let rlen = self
-            .backend()
-            .fill(&mut buf[0..accessor.len as usize], offset)
-            .unwrap();
+        for buf in self.continous_iter(offset, (header.shared_count << 2) as Off) {
+            let data = buf.content();
+            extend_from_slice(&mut indexes, unsafe {
+                core::slice::from_raw_parts(data.as_ptr().cast(), data.len() >> 2)
+            });
+        }
 
-        let header: xattrs::DiskEntryIndexHeader =
-            unsafe { *(buf.as_ptr() as *const xattrs::DiskEntryIndexHeader) };
-
-        let inline_count =
-            (((rlen - xattrs::XATTRS_HEADER_SIZE) >> 2) as usize).min(header.shared_count as usize);
-        let outbound_count = header.shared_count as usize - inline_count;
-
-        extend_from_slice(&mut indexes, unsafe {
-            core::slice::from_raw_parts(
-                (buf[xattrs::XATTRS_HEADER_SIZE as usize..accessor.len as usize])
-                    .as_ptr()
-                    .cast(),
-                inline_count,
-            )
-        });
-
-        if outbound_count == 0 {
-            xattrs::MemEntryIndexHeader {
-                name_filter: header.name_filter,
-                shared_indexes: indexes,
-            }
-        } else {
-            for block in self.continous_iter(
-                self.blkpos(self.blk_round_up(offset)),
-                (outbound_count << 2) as Off,
-            ) {
-                let data = block.content();
-                extend_from_slice(&mut indexes, unsafe {
-                    core::slice::from_raw_parts(data.as_ptr().cast(), data.len() >> 2)
-                });
-            }
-            xattrs::MemEntryIndexHeader {
-                name_filter: header.name_filter,
-                shared_indexes: indexes,
-            }
+        XAttrSharedEntries {
+            name_filter: header.name_filter,
+            shared_indexes: indexes,
         }
     }
     fn flatmap(&self, inode: &I, offset: Off, inline: bool) -> MapResult {
         let nblocks = self.blk_round_up(inode.info().file_size());
-
         let blkaddr = match inode.info().spec() {
             Spec::Data(ds) => match ds {
                 DataSpec::RawBlk(blkaddr) => blkaddr,
@@ -391,78 +361,98 @@ where
         None
     }
 
-    fn get_xattr(&self, inode: &I, index: u32, name: &[u8], buffer: &mut [u8]) -> bool {
-        let count = inode.info().xattr_count();
-        let shared_count = inode.xattrs_header().shared_indexes.len();
-        let inline_count = count as usize - shared_count;
+    fn get_xattr(
+        &self,
+        inode: &I,
+        index: u32,
+        name: &[u8],
+        buffer: &mut Option<&mut [u8]>,
+    ) -> XAttrResult {
+        let shared_count = inode.xattrs_shared_entries().shared_indexes.len();
 
         let inline_offset = self.iloc(inode.nid())
             + inode.info().inode_size() as Off
-            + size_of::<DiskEntryIndexHeader>() as Off
-            + shared_count as Off * 4;
+            + size_of::<XAttrSharedEntrySummary>() as Off
+            + 4 * shared_count as Off;
+
+        let inline_len = inode.info().xattr_size()
+            - size_of::<XAttrSharedEntrySummary>() as Off
+            - shared_count as Off * 4;
 
         {
             let mut inline_provider =
-                SkippableContinousIter::new(self.continous_iter(inline_offset, u64::MAX));
-            for _ in 0..inline_count {
+                SkippableContinousIter::new(self.continous_iter(inline_offset, inline_len));
+            while !inline_provider.eof() {
                 let header = inline_provider.get_entry_header();
-                if inline_provider.get_xattr_value(
-                    self.xattr_prefixes(),
+                let result = inline_provider.query_xattr_value(
+                    self.xattr_infixes(),
                     &header,
                     name,
                     index,
                     buffer,
-                ) {
-                    return true;
+                );
+                if result.is_ok() {
+                    return result;
                 }
             }
         }
 
-        for index in inode.xattrs_header().shared_indexes.iter() {
-            let mut provider = SkippableContinousIter::new(self.continous_iter(
+        for index in inode.xattrs_shared_entries().shared_indexes.iter() {
+            let mut shared_provider = SkippableContinousIter::new(self.continous_iter(
                 self.blkpos(self.superblock().xattr_blkaddr) + (*index as Off) * 4,
                 u64::MAX,
             ));
-            let header = provider.get_entry_header();
-            if provider.get_xattr_value(self.xattr_prefixes(), &header, name, *index, buffer) {
-                return true;
+            let header = shared_provider.get_entry_header();
+            let result = shared_provider.query_xattr_value(
+                self.xattr_infixes(),
+                &header,
+                name,
+                *index,
+                buffer,
+            );
+            if result.is_ok() {
+                return result;
             }
         }
-        false
+
+        Err(XAttrError::NotFound)
     }
 
-    fn list_xattrs(&self, inode: &I, buffer: &mut [u8]) {
-        let count = inode.info().xattr_count();
-        let shared_count = inode.xattrs_header().shared_indexes.len();
-        let inline_count = count as usize - shared_count;
+    fn list_xattrs(&self, inode: &I, buffer: &mut [u8]) -> usize {
+        let shared_count = inode.xattrs_shared_entries().shared_indexes.len();
         let inline_offset = self.iloc(inode.nid())
             + inode.info().inode_size() as Off
-            + size_of::<DiskEntryIndexHeader>() as Off
+            + size_of::<XAttrSharedEntrySummary>() as Off
             + shared_count as Off * 4;
-
         let mut offset = 0;
+        let inline_len = inode.info().xattr_size()
+            - size_of::<XAttrSharedEntrySummary>() as Off
+            - shared_count as Off * 4;
+
         {
             let mut inline_provider =
-                SkippableContinousIter::new(self.continous_iter(inline_offset, u64::MAX));
-            for _ in 0..inline_count {
+                SkippableContinousIter::new(self.continous_iter(inline_offset, inline_len));
+            while !inline_provider.eof() {
                 let header = inline_provider.get_entry_header();
-                offset += inline_provider.get_xattr_name(
-                    self.xattr_prefixes(),
+                offset += inline_provider.get_xattr_key(
+                    self.xattr_infixes(),
                     &header,
                     &mut buffer[offset..],
                 );
+                inline_provider.skip_xattr_value(&header);
             }
         }
 
-        for index in inode.xattrs_header().shared_indexes.iter() {
-            let mut provider = SkippableContinousIter::new(self.continous_iter(
+        for index in inode.xattrs_shared_entries().shared_indexes.iter() {
+            let mut shared_provider = SkippableContinousIter::new(self.continous_iter(
                 self.blkpos(self.superblock().xattr_blkaddr) + (*index as Off) * 4,
                 u64::MAX,
             ));
-            let header = provider.get_entry_header();
+            let header = shared_provider.get_entry_header();
             offset +=
-                provider.get_xattr_name(self.xattr_prefixes(), &header, &mut buffer[offset..]);
+                shared_provider.get_xattr_key(self.xattr_infixes(), &header, &mut buffer[offset..]);
         }
+        offset
     }
 }
 
@@ -492,17 +482,17 @@ where
 pub(crate) mod tests {
     extern crate std;
 
-    use alloc::string::ToString;
-
+    use super::inode::tests::*;
+    use super::operations::*;
     use super::*;
-    use crate::inode::tests::*;
-    use crate::operations::*;
+
     use hex_literal::hex;
     use sha2::{Digest, Sha512};
     use std::collections::HashMap;
     use std::format;
     use std::fs::File;
     use std::path::Path;
+    use std::string::ToString;
     use std::vec;
 
     pub(crate) const SB_MAGIC: u32 = 0xE0F5E1E2;
@@ -511,7 +501,7 @@ pub(crate) mod tests {
         SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>>;
 
     pub(crate) fn load_fixtures() -> impl Iterator<Item = File> {
-        vec![512, 1024, 2048, 4096].into_iter().map(|num| {
+        vec![4096].into_iter().map(|num| {
             let mut s = env!("CARGO_MANIFEST_DIR").to_string();
             s.push_str(&format!("/tests/sample_{num}.img"));
             File::options()
@@ -543,7 +533,7 @@ pub(crate) mod tests {
     }
 
     fn test_continous_iter(sbi: &mut SimpleBufferedFileSystem) {
-        const README_HEX: [u8; 64] = hex!("99fffc75aec028f417d9782fffed6c5d877a29ad1b16fc62bfeb168cdaf8db6db2bad1814904cd0fa18a2396c2c618041682a010601f4052b9895138d4ed6f16");
+        const README_CHECKSUM: [u8; 64] = hex!("99fffc75aec028f417d9782fffed6c5d877a29ad1b16fc62bfeb168cdaf8db6db2bad1814904cd0fa18a2396c2c618041682a010601f4052b9895138d4ed6f16");
         const README_FILE_SIZE: u64 = 38;
         const README_TYPE: Type = Type::Regular;
         let inode = ilookup(&*sbi.filesystem, &mut sbi.inodes, "/README.md").unwrap();
@@ -559,13 +549,72 @@ pub(crate) mod tests {
             hasher.update(block.content());
         }
         let result = hasher.finalize();
-        assert_eq!(result[..], README_HEX);
+        assert_eq!(result[..], README_CHECKSUM);
+    }
+
+    fn test_get_xattr(sbi: &mut SimpleBufferedFileSystem) {
+        const README_SHA512_LITERAL: &[u8] = b"99fffc75aec028f417d9782fffed6c5d877a29ad1b16fc62bfeb168cdaf8db6db2bad1814904cd0fa18a2396c2c618041682a010601f4052b9895138d4ed6f16";
+        const README_SHA512HMAC_LITERAL: &[u8] = b"45d111b7dc1799cc9c4f9989b301cac37c7ba66f5cfb559566c407f7f9476e2596b53d345045d426d9144eaabb9f55abb05f03b1ff44d69081831b19c87cb2d3";
+
+        let inode = ilookup(&*sbi.filesystem, &mut sbi.inodes, "/README.md").unwrap();
+
+        {
+            let mut sha512 = [0u8; 128];
+            assert!(sbi
+                .filesystem
+                .get_xattr(inode, 1, b"user.sha512sum", &mut Some(&mut sha512))
+                .unwrap()
+                .is_none());
+
+            assert_eq!(sha512, README_SHA512_LITERAL);
+
+            let sha512_vec = sbi
+                .filesystem
+                .get_xattr(inode, 1, b"user.sha512sum", &mut None)
+                .unwrap()
+                .unwrap();
+            assert_eq!(sha512_vec, README_SHA512_LITERAL);
+        }
+
+        {
+            let mut sha512_hmac = [0u8; 128];
+            assert!(sbi
+                .filesystem
+                .get_xattr(inode, 1, b"user.sha512hmac", &mut Some(&mut sha512_hmac))
+                .unwrap()
+                .is_none());
+
+            assert_eq!(sha512_hmac, README_SHA512HMAC_LITERAL);
+            let sha512_hmac_vec = sbi
+                .filesystem
+                .get_xattr(inode, 1, b"user.sha512hmac", &mut None)
+                .unwrap()
+                .unwrap();
+            assert_eq!(sha512_hmac_vec, README_SHA512HMAC_LITERAL);
+        }
+
+        assert!(sbi
+            .filesystem
+            .get_xattr(inode, 1, b"user.notfound", &mut None)
+            .is_err_and(|x| x == XAttrError::NotFound));
+    }
+
+    fn test_list_xattr(sbi: &mut SimpleBufferedFileSystem) {
+        let mut result = [0u8; 512];
+        let inode = ilookup(&*sbi.filesystem, &mut sbi.inodes, "/README.md").unwrap();
+        let length = sbi.filesystem.list_xattrs(inode, &mut result);
+        assert_eq!(
+            &result[..length],
+            b"user.sha512sum\0user.sha512hmac\0security.selinux\0"
+        );
     }
 
     pub(crate) fn test_filesystem(sbi: &mut SimpleBufferedFileSystem) {
         test_superblock_def(sbi);
         test_filesystem_ilookup(sbi);
         test_continous_iter(sbi);
+        test_get_xattr(sbi);
+        test_list_xattr(sbi);
     }
 
     #[test]

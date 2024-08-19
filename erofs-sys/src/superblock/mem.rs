@@ -1,8 +1,7 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-later
 
-use self::operations::get_xattr_prefixes;
-
+use super::operations::*;
 use super::*;
 
 // Memory Mapped Device/File so we need to have some external lifetime on the backend trait.
@@ -15,7 +14,7 @@ where
 {
     backend: T,
     sb: SuperBlock,
-    prefixes: Vec<xattrs::Prefix>,
+    infixes: Vec<XAttrInfix>,
     device_info: DeviceInfo,
 }
 
@@ -48,8 +47,8 @@ where
     ) -> Box<dyn ContinousBufferIter<'a> + 'a> {
         heap_alloc(ContinuousRefIter::new(&self.backend, offset, len))
     }
-    fn xattr_prefixes(&self) -> &Vec<xattrs::Prefix> {
-        &self.prefixes
+    fn xattr_infixes(&self) -> &Vec<XAttrInfix> {
+        &self.infixes
     }
     fn device_info(&self) -> &DeviceInfo {
         &self.device_info
@@ -64,7 +63,7 @@ where
         let mut buf = SUPERBLOCK_EMPTY_BUF;
         backend.fill(&mut buf, EROFS_SUPER_OFFSET).unwrap();
         let sb: SuperBlock = buf.into();
-        let prefixes = get_xattr_prefixes(&sb, &backend);
+        let prefixes = get_xattr_infixes(&sb, &backend);
         let device_info = get_device_infos(&mut ContinuousRefIter::new(
             &backend,
             sb.devt_slotoff as Off * 128,
@@ -73,7 +72,7 @@ where
         Self {
             backend,
             sb,
-            prefixes,
+            infixes: prefixes,
             device_info,
         }
     }

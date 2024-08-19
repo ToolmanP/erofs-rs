@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT or GPL-2.0-later
 
 use super::superblock::*;
+use super::xattrs::*;
 use super::*;
 use core::mem::size_of;
 
@@ -265,10 +266,10 @@ pub(crate) trait Inode: Sized {
         _sb: &SuperBlock,
         info: InodeInfo,
         nid: Nid,
-        xattrs_header: xattrs::MemEntryIndexHeader,
+        xattrs_shared_entries: XAttrSharedEntries,
     ) -> Self;
     fn info(&self) -> &InodeInfo;
-    fn xattrs_header(&self) -> &xattrs::MemEntryIndexHeader;
+    fn xattrs_shared_entries(&self) -> &XAttrSharedEntries;
     fn nid(&self) -> Nid;
 }
 
@@ -351,7 +352,6 @@ pub(crate) mod tests {
 
     extern crate std;
     use super::*;
-    use crate::xattrs;
     use std::collections::{hash_map::Entry, HashMap};
 
     #[test]
@@ -362,7 +362,7 @@ pub(crate) mod tests {
 
     pub(crate) struct SimpleInode {
         info: InodeInfo,
-        xattr_header: xattrs::MemEntryIndexHeader,
+        xattr_shared_entries: XAttrSharedEntries,
         nid: Nid,
     }
 
@@ -371,16 +371,16 @@ pub(crate) mod tests {
             _sb: &SuperBlock,
             info: InodeInfo,
             nid: Nid,
-            xattr_header: xattrs::MemEntryIndexHeader,
+            xattr_header: XAttrSharedEntries,
         ) -> Self {
             Self {
                 info,
-                xattr_header,
+                xattr_shared_entries: xattr_header,
                 nid,
             }
         }
-        fn xattrs_header(&self) -> &xattrs::MemEntryIndexHeader {
-            &self.xattr_header
+        fn xattrs_shared_entries(&self) -> &XAttrSharedEntries {
+            &self.xattr_shared_entries
         }
         fn nid(&self) -> Nid {
             self.nid
@@ -393,13 +393,12 @@ pub(crate) mod tests {
     impl InodeCollection for HashMap<Nid, SimpleInode> {
         type I = SimpleInode;
         fn iget(&mut self, nid: Nid, f: &dyn FileSystem<Self::I>) -> &mut Self::I {
+            let info = f.read_inode_info(nid);
+            let xattrs_header = f.read_inode_xattrs_shared_entries(nid, &info);
             match self.entry(nid) {
-                Entry::Vacant(v) => v.insert(Self::I::new(
-                    f.superblock(),
-                    f.read_inode_info(nid),
-                    nid,
-                    f.read_inode_xattrs_index(nid),
-                )),
+                Entry::Vacant(v) => {
+                    v.insert(Self::I::new(f.superblock(), info, nid, xattrs_header))
+                }
                 Entry::Occupied(o) => o.into_mut(),
             }
         }

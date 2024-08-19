@@ -1,7 +1,7 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-later
 
-use self::operations::get_xattr_prefixes;
+use self::operations::get_xattr_infixes;
 
 use super::*;
 
@@ -11,7 +11,7 @@ where
     B: FileBackend,
 {
     backend: B,
-    prefixes: Vec<xattrs::Prefix>,
+    prefixes: Vec<XAttrInfix>,
     sb: SuperBlock,
     device_info: DeviceInfo,
 }
@@ -45,7 +45,7 @@ where
     ) -> Box<dyn ContinousBufferIter<'a> + 'a> {
         heap_alloc(ContinuousTempBufferIter::new(&self.backend, offset, len))
     }
-    fn xattr_prefixes(&self) -> &Vec<xattrs::Prefix> {
+    fn xattr_infixes(&self) -> &Vec<XAttrInfix> {
         &self.prefixes
     }
     fn device_info(&self) -> &DeviceInfo {
@@ -61,7 +61,7 @@ where
         let mut buf = SUPERBLOCK_EMPTY_BUF;
         backend.fill(&mut buf, EROFS_SUPER_OFFSET).unwrap();
         let sb: SuperBlock = buf.into();
-        let prefixes = get_xattr_prefixes(&sb, &backend);
+        let prefixes = get_xattr_infixes(&sb, &backend);
 
         let device_info = get_device_infos(&mut ContinuousTempBufferIter::new(
             &backend,
