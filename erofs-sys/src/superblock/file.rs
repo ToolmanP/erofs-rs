@@ -80,13 +80,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    extern crate alloc;
+
     extern crate std;
+    use super::superblock::tests::*;
+    use super::superblock::uncompressed::*;
     use super::*;
-    use crate::inode::tests::*;
-    use crate::superblock::tests::*;
-    use crate::superblock::uncompressed::*;
-    use alloc::boxed::Box;
+
+    use std::boxed::Box;
     use std::collections::HashMap;
     use std::fs::File;
     use std::os::unix::fs::FileExt;
@@ -103,11 +103,11 @@ mod tests {
     #[test]
     fn test_uncompressed_img_filesystem() {
         for file in load_fixtures() {
-            let mut sbi: SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>> =
-                SuperblockInfo::new(
-                    Box::new(ImageFileSystem::new(UncompressedBackend::new(file))),
-                    HashMap::new(),
-                );
+            let mut sbi: SimpleBufferedFileSystem = SuperblockInfo::new(
+                Box::new(ImageFileSystem::new(UncompressedBackend::new(file))),
+                HashMap::new(),
+                (),
+            );
             test_filesystem(&mut sbi);
         }
     }

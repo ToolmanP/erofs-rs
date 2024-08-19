@@ -456,24 +456,26 @@ where
     }
 }
 
-pub(crate) struct SuperblockInfo<I, C>
+pub(crate) struct SuperblockInfo<I, C, T>
 where
     I: Inode,
     C: InodeCollection<I = I>,
 {
     pub(crate) filesystem: Box<dyn FileSystem<I>>,
     pub(crate) inodes: C,
+    pub(crate) opaque: T,
 }
 
-impl<I, C> SuperblockInfo<I, C>
+impl<I, C, T> SuperblockInfo<I, C, T>
 where
     I: Inode,
     C: InodeCollection<I = I>,
 {
-    pub(crate) fn new(fs: Box<dyn FileSystem<I>>, c: C) -> Self {
+    pub(crate) fn new(fs: Box<dyn FileSystem<I>>, c: C, opaque: T) -> Self {
         Self {
             filesystem: fs,
             inodes: c,
+            opaque,
         }
     }
 }
@@ -498,7 +500,7 @@ pub(crate) mod tests {
     pub(crate) const SB_MAGIC: u32 = 0xE0F5E1E2;
 
     pub(crate) type SimpleBufferedFileSystem =
-        SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>>;
+        SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>, ()>;
 
     pub(crate) fn load_fixtures() -> impl Iterator<Item = File> {
         vec![4096].into_iter().map(|num| {

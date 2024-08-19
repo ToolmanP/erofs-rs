@@ -81,13 +81,12 @@ where
 #[cfg(test)]
 mod tests {
     extern crate std;
+
+    use super::data::RefBuffer;
+    use super::superblock::tests::*;
+    use super::superblock::uncompressed::*;
     use super::*;
-    use crate::data::RefBuffer;
-    use crate::inode::tests::*;
-    use crate::superblock::tests::*;
-    use crate::superblock::uncompressed::*;
-    use crate::superblock::PageSource;
-    use crate::Off;
+
     use memmap2::MmapMut;
     use std::collections::HashMap;
 
@@ -136,13 +135,13 @@ mod tests {
     #[test]
     fn test_uncompressed_mmap_filesystem() {
         for file in load_fixtures() {
-            let mut sbi: SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>> =
-                SuperblockInfo::new(
-                    Box::new(MemFileSystem::new(UncompressedBackend::new(unsafe {
-                        MmapMut::map_mut(&file).unwrap()
-                    }))),
-                    HashMap::new(),
-                );
+            let mut sbi: SimpleBufferedFileSystem = SuperblockInfo::new(
+                Box::new(MemFileSystem::new(UncompressedBackend::new(unsafe {
+                    MmapMut::map_mut(&file).unwrap()
+                }))),
+                HashMap::new(),
+                (),
+            );
             test_filesystem(&mut sbi);
         }
     }
