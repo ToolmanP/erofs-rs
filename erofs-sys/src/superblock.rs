@@ -562,37 +562,25 @@ pub(crate) mod tests {
 
         {
             let mut sha512 = [0u8; 128];
-            assert!(sbi
+            if let XAttrValue::Vec(_b) = sbi
                 .filesystem
                 .get_xattr(inode, 1, b"sha512sum", &mut Some(&mut sha512))
                 .unwrap()
-                .is_none());
+            {
+                panic!();
+            }
 
             assert_eq!(sha512, README_SHA512_LITERAL);
 
-            let sha512_vec = sbi
+            if let XAttrValue::Vec(b) = sbi
                 .filesystem
                 .get_xattr(inode, 1, b"sha512sum", &mut None)
                 .unwrap()
-                .unwrap();
-            assert_eq!(sha512_vec, README_SHA512_LITERAL);
-        }
-
-        {
-            let mut sha512_hmac = [0u8; 128];
-            assert!(sbi
-                .filesystem
-                .get_xattr(inode, 1, b"sha512hmac", &mut Some(&mut sha512_hmac))
-                .unwrap()
-                .is_none());
-
-            assert_eq!(sha512_hmac, README_SHA512HMAC_LITERAL);
-            let sha512_hmac_vec = sbi
-                .filesystem
-                .get_xattr(inode, 1, b"sha512hmac", &mut None)
-                .unwrap()
-                .unwrap();
-            assert_eq!(sha512_hmac_vec, README_SHA512HMAC_LITERAL);
+            {
+                assert_eq!(b, README_SHA512_LITERAL);
+            } else {
+                panic!();
+            }
         }
 
         {

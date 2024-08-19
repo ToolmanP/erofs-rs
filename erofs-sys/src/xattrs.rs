@@ -127,7 +127,14 @@ pub(crate) enum XAttrError {
     NotMatched,
     Invalid,
 }
-pub(crate) type XAttrResult = Result<Option<Vec<u8>>, XAttrError>;
+
+#[derive(Debug)]
+pub(crate) enum XAttrValue {
+    Buffer(usize),
+    Vec(Vec<u8>),
+}
+
+pub(crate) type XAttrResult = Result<XAttrValue, XAttrError>;
 
 /// An iterator to read xattrs by comparing the entry's name one by one and reads its value
 /// correspondingly.
@@ -241,12 +248,12 @@ impl<'a> XAttrEntriesProvider for SkippableContinousIter<'a> {
             Ok(()) => match buffer.as_mut() {
                 Some(b) => {
                     self.read(&mut b[..header.value_len as usize]);
-                    Ok(None)
+                    Ok(XAttrValue::Buffer(header.value_len as usize))
                 }
                 None => {
                     let mut b: Vec<u8> = vec_with_capacity(header.value_len as usize);
                     self.read(&mut b);
-                    Ok(Some(b))
+                    Ok(XAttrValue::Vec(b))
                 }
             },
             Err(nvalue) => {
