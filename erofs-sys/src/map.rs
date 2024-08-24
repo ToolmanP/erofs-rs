@@ -34,6 +34,15 @@ pub(crate) enum MapType {
     Normal,
 }
 
+impl From<MapType> for u32 {
+    fn from(value: MapType) -> Self {
+        match value {
+            MapType::Meta => MAP_META | MAP_MAPPED,
+            MapType::Normal => MAP_MAPPED,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum MapError {
     OutofBound,
