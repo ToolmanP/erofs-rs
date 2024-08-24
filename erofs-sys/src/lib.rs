@@ -51,6 +51,7 @@ pub(crate) mod data;
 pub(crate) mod devices;
 pub(crate) mod dir;
 pub(crate) mod inode;
+pub(crate) mod errnos;
 pub(crate) mod map;
 pub(crate) mod operations;
 pub(crate) mod superblock;
