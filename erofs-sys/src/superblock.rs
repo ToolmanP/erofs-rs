@@ -219,17 +219,19 @@ where
     }
 
     fn chunk_map(&self, inode: &I, offset: Off) -> MapResult {
-        let cs = match inode.info().spec() {
-            Spec::Data(ds) => match ds {
-                DataSpec::ChunkFormat(cs) => cs,
+        let chunkformat = match inode.info().spec() {
+            Spec::Data(dataspec) => match dataspec {
+                DataSpec::Chunk(chunkformat) => chunkformat,
                 _ => unimplemented!(),
             },
             _ => unimplemented!(),
         };
-        let chunkbits = ((cs & CHUNK_BLKBITS_MASK) + self.superblock().blkszbits as u16) as Off;
 
+        let chunkbits = (chunkformat.chunkbits() + self.superblock().blkszbits as u16) as Off;
         let chunknr = offset >> chunkbits;
-        if cs & CHUNK_FORMAT_INDEXES != 0 {
+        let chunkoff = offset & ((1 << chunkbits) - 1);
+
+        if chunkformat.is_chunkindex() {
             let unit = size_of::<ChunkIndex>() as Off;
             let pos = round!(
                 UP,
@@ -248,11 +250,11 @@ where
             } else {
                 Ok(Map {
                     logical: Segment {
-                        start: chunknr << chunkbits,
+                        start: (chunknr << chunkbits) + chunkoff,
                         len: 1 << chunkbits,
                     },
                     physical: Segment {
-                        start: self.blkpos(chunk_index.blkaddr),
+                        start: self.blkpos(chunk_index.blkaddr) + chunkoff,
                         len: 1 << chunkbits,
                     },
                     algorithm_format: 0,
@@ -273,17 +275,18 @@ where
             let mut buf = [0u8; 4];
             self.backend().fill(&mut buf, pos).unwrap();
             let blkaddr = u32::from_le_bytes(buf);
+            let len = (1 << chunkbits).min(inode.info().file_size() - offset);
             if blkaddr == u32::MAX {
                 Err(MapError::OutofBound)
             } else {
                 Ok(Map {
                     logical: Segment {
-                        start: chunknr << chunkbits,
-                        len: 1 << chunkbits,
+                        start: (chunknr << chunkbits) + chunkoff,
+                        len,
                     },
                     physical: Segment {
-                        start: self.blkpos(blkaddr),
-                        len: 1 << chunkbits,
+                        start: self.blkpos(blkaddr) + chunkoff,
+                        len,
                     },
                     algorithm_format: 0,
                     device_id: 0,
@@ -503,7 +506,7 @@ pub(crate) mod tests {
         SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>, ()>;
 
     pub(crate) fn load_fixtures() -> impl Iterator<Item = File> {
-        vec![4096].into_iter().map(|num| {
+        let flat = vec![512, 1024, 2048, 4096].into_iter().map(|num| {
             let mut s = env!("CARGO_MANIFEST_DIR").to_string();
             s.push_str(&format!("/tests/sample_{num}.img"));
             File::options()
@@ -511,7 +514,18 @@ pub(crate) mod tests {
                 .write(true)
                 .open(Path::new(&s))
                 .unwrap()
-        })
+        });
+
+        let chunk = vec![1024].into_iter().map(|num| {
+            let mut s = env!("CARGO_MANIFEST_DIR").to_string();
+            s.push_str(&format!("/tests/sample_512_{num}.img"));
+            File::options()
+                .read(true)
+                .write(true)
+                .open(Path::new(&s))
+                .unwrap()
+        });
+        flat.chain(chunk)
     }
 
     fn test_superblock_def(sbi: &mut SimpleBufferedFileSystem) {

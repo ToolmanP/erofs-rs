@@ -118,10 +118,11 @@ pub(crate) enum InodeInfo {
 }
 
 pub(crate) const CHUNK_BLKBITS_MASK: u16 = 0x1f;
-pub(crate) const CHUNK_FORMAT_INDEXES: u16 = 0x20;
+pub(crate) const CHUNK_FORMAT_INDEX_BIT: u16 = 0x20;
 
 /// Represents on-disk chunk index of the file backing inode.
 #[repr(C)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct ChunkIndex {
     pub(crate) advise: u16,
     pub(crate) device_id: u16,
@@ -141,11 +142,30 @@ impl From<[u8; 8]> for ChunkIndex {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ChunkFormat(u16);
+
+impl ChunkFormat {
+    pub(crate) fn is_chunkindex(&self) -> bool {
+        self.0 & CHUNK_FORMAT_INDEX_BIT != 0
+    }
+    pub(crate) fn chunkbits(&self) -> u16 {
+        self.0 & CHUNK_BLKBITS_MASK
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ChunkDesc {
+    ChunkIndex(ChunkIndex),
+    RawPos(Blk),
+}
+
 /// Represents the data spec of the inode which is either consequentive raw blocks or in sparse chunk format.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum DataSpec {
     RawBlk(u32),
-    ChunkFormat(u16),
+    Chunk(ChunkFormat),
 }
 
 /// Represents the inode spec which is either data or device.
@@ -165,7 +185,7 @@ impl Spec {
             }
             Layout::Chunk => {
                 let chunkformat = u16::from_le_bytes([u[0], u[1]]);
-                Spec::Data(DataSpec::ChunkFormat(chunkformat))
+                Spec::Data(DataSpec::Chunk(ChunkFormat(chunkformat)))
             }
             _ => Spec::Unknown,
         }
