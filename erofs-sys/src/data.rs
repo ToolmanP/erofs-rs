@@ -580,9 +580,12 @@ fn cmp_with_cursor_move(
 }
 
 impl<'a> SkippableContinousIter<'a> {
-    pub(crate) fn new(mut iter: Box<dyn ContinousBufferIter<'a> + 'a>) -> Self {
+    pub(crate) fn try_new(mut iter: Box<dyn ContinousBufferIter<'a> + 'a>) -> Option<Self> {
+        if iter.eof() {
+            return None;
+        }
         let data = iter.next().unwrap();
-        Self { iter, data, cur: 0 }
+        Some(Self { iter, data, cur: 0 })
     }
     pub(crate) fn skip(&mut self, offset: Off) {
         let dlen = self.data.content().len() as Off - self.cur;

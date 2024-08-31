@@ -382,9 +382,9 @@ where
             - size_of::<XAttrSharedEntrySummary>() as Off
             - shared_count as Off * 4;
 
+        if let Some(mut inline_provider) =
+            SkippableContinousIter::try_new(self.continous_iter(inline_offset, inline_len))
         {
-            let mut inline_provider =
-                SkippableContinousIter::new(self.continous_iter(inline_offset, inline_len));
             while !inline_provider.eof() {
                 let header = inline_provider.get_entry_header();
                 let result = inline_provider.query_xattr_value(
@@ -401,10 +401,11 @@ where
         }
 
         for entry_index in inode.xattrs_shared_entries().shared_indexes.iter() {
-            let mut shared_provider = SkippableContinousIter::new(self.continous_iter(
+            let mut shared_provider = SkippableContinousIter::try_new(self.continous_iter(
                 self.blkpos(self.superblock().xattr_blkaddr) + (*entry_index as Off) * 4,
                 u64::MAX,
-            ));
+            ))
+            .unwrap();
             let header = shared_provider.get_entry_header();
             let result = shared_provider.query_xattr_value(
                 self.xattr_infixes(),
@@ -432,9 +433,9 @@ where
             - size_of::<XAttrSharedEntrySummary>() as Off
             - shared_count as Off * 4;
 
+        if let Some(mut inline_provider) =
+            SkippableContinousIter::try_new(self.continous_iter(inline_offset, inline_len))
         {
-            let mut inline_provider =
-                SkippableContinousIter::new(self.continous_iter(inline_offset, inline_len));
             while !inline_provider.eof() {
                 let header = inline_provider.get_entry_header();
                 offset += inline_provider.get_xattr_key(
@@ -447,10 +448,11 @@ where
         }
 
         for index in inode.xattrs_shared_entries().shared_indexes.iter() {
-            let mut shared_provider = SkippableContinousIter::new(self.continous_iter(
+            let mut shared_provider = SkippableContinousIter::try_new(self.continous_iter(
                 self.blkpos(self.superblock().xattr_blkaddr) + (*index as Off) * 4,
                 u64::MAX,
-            ));
+            ))
+            .unwrap();
             let header = shared_provider.get_entry_header();
             offset +=
                 shared_provider.get_xattr_key(self.xattr_infixes(), &header, &mut buffer[offset..]);
@@ -568,7 +570,7 @@ pub(crate) mod tests {
         assert_eq!(result[..], README_CHECKSUM);
     }
 
-    fn test_get_xattr(sbi: &mut SimpleBufferedFileSystem) {
+    fn test_get_file_xattr(sbi: &mut SimpleBufferedFileSystem) {
         const README_SHA512_LITERAL: &[u8] = b"99fffc75aec028f417d9782fffed6c5d877a29ad1b16fc62bfeb168cdaf8db6db2bad1814904cd0fa18a2396c2c618041682a010601f4052b9895138d4ed6f16";
         const README_SHA512HMAC_LITERAL: &[u8] = b"45d111b7dc1799cc9c4f9989b301cac37c7ba66f5cfb559566c407f7f9476e2596b53d345045d426d9144eaabb9f55abb05f03b1ff44d69081831b19c87cb2d3";
 
@@ -606,7 +608,15 @@ pub(crate) mod tests {
 
         assert!(sbi
             .filesystem
-            .get_xattr(inode, 1, b"notfound", &mut None)
+            .get_xattr(inode, 2, b"", &mut None)
+            .is_err_and(|x| x == XAttrError::NotFound));
+    }
+
+    fn test_get_dir_xattr(sbi: &mut SimpleBufferedFileSystem) {
+        let inode = ilookup(&*sbi.filesystem, &mut sbi.inodes, "/").unwrap();
+        assert!(sbi
+            .filesystem
+            .get_xattr(inode, 2, b"", &mut None)
             .is_err_and(|x| x == XAttrError::NotFound));
     }
 
@@ -624,7 +634,8 @@ pub(crate) mod tests {
         test_superblock_def(sbi);
         test_filesystem_ilookup(sbi);
         test_continous_iter(sbi);
-        test_get_xattr(sbi);
+        test_get_file_xattr(sbi);
+        test_get_dir_xattr(sbi);
         test_list_xattr(sbi);
     }
 
