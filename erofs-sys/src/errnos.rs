@@ -43,7 +43,7 @@ pub(crate) enum Errno {
     ENOSYS,
     ENOTEMPTY,
     ELOOP,
-    ENOMSG,
+    ENOMSG = 42,
     EIDRM,
     ECHRNG,
     EL2NSYNC,
@@ -59,7 +59,7 @@ pub(crate) enum Errno {
     ENOANO,
     EBADRQC,
     EBADSLT,
-    EBFONT,
+    EBFONT = 59,
     ENOSTR,
     ENODATA,
     ETIME,
@@ -134,4 +134,15 @@ pub(crate) enum Errno {
     ENOTRECOVERABLE,
     ERFKILL,
     EHWPOISON,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+
+    fn test_proper_errno_value() {
+        assert_eq!(Errno::ERANGE as i32, 34);
+        assert_eq!(Errno::ENODATA as i32, 61);
+    }
 }
