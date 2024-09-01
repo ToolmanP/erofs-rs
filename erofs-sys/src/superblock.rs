@@ -150,7 +150,7 @@ where
         InodeInfo::try_from(buf)
     }
 
-    fn xattr_infixes(&self) -> &Vec<xattrs::XAttrInfix>;
+    fn xattr_infixes(&self) -> &Vec<XAttrInfix>;
 
     // Currently we eagerly initialized all xattrs;
     //
