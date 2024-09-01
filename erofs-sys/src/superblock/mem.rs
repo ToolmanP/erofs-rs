@@ -63,7 +63,7 @@ where
         let mut buf = SUPERBLOCK_EMPTY_BUF;
         backend.fill(&mut buf, EROFS_SUPER_OFFSET).unwrap();
         let sb: SuperBlock = buf.into();
-        let prefixes = get_xattr_infixes(&sb, &backend);
+        let infixes = get_xattr_infixes(&sb, &backend);
         let device_info = get_device_infos(&mut ContinuousRefIter::new(
             &backend,
             sb.devt_slotoff as Off * 128,
@@ -72,7 +72,7 @@ where
         Self {
             backend,
             sb,
-            infixes: prefixes,
+            infixes,
             device_info,
         }
     }

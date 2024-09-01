@@ -11,7 +11,7 @@ where
     B: FileBackend,
 {
     backend: B,
-    prefixes: Vec<XAttrInfix>,
+    infixes: Vec<XAttrInfix>,
     sb: SuperBlock,
     device_info: DeviceInfo,
 }
@@ -46,7 +46,7 @@ where
         heap_alloc(ContinuousTempBufferIter::new(&self.backend, offset, len))
     }
     fn xattr_infixes(&self) -> &Vec<XAttrInfix> {
-        &self.prefixes
+        &self.infixes
     }
     fn device_info(&self) -> &DeviceInfo {
         &self.device_info
@@ -61,18 +61,16 @@ where
         let mut buf = SUPERBLOCK_EMPTY_BUF;
         backend.fill(&mut buf, EROFS_SUPER_OFFSET).unwrap();
         let sb: SuperBlock = buf.into();
-        let prefixes = get_xattr_infixes(&sb, &backend);
-
+        let infixes = get_xattr_infixes(&sb, &backend);
         let device_info = get_device_infos(&mut ContinuousTempBufferIter::new(
             &backend,
             sb.devt_slotoff as Off * 128,
             sb.extra_devices as Off * 128,
         ));
-
         Self {
             backend,
             sb,
-            prefixes,
+            infixes,
             device_info,
         }
     }
