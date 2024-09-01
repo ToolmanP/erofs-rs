@@ -1,7 +1,7 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-later
 
-use super::*;
+use super::super::*;
 
 pub(crate) struct UncompressedBackend<T>
 where

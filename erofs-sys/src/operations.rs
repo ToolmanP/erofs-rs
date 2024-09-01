@@ -4,7 +4,7 @@
 use alloc::vec::Vec;
 
 use super::alloc_helper::*;
-use super::data::*;
+use super::data::raw_iters::*;
 use super::inode::*;
 use super::superblock::*;
 use super::xattrs::*;

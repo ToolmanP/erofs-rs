@@ -1,6 +1,7 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-later
 
+use super::data::raw_iters::ref_iter::*;
 use super::operations::*;
 use super::*;
 
@@ -85,8 +86,8 @@ mod tests {
     extern crate std;
 
     use super::data::RefBuffer;
+    use super::superblock::backends::uncompressed::*;
     use super::superblock::tests::*;
-    use super::superblock::uncompressed::*;
     use super::*;
 
     use memmap2::MmapMut;

@@ -1,8 +1,8 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-later
 
-use self::operations::get_xattr_infixes;
-
+use super::data::raw_iters::temp_iter::*;
+use super::operations::*;
 use super::*;
 
 pub(crate) struct ImageFileSystem<B>
@@ -82,8 +82,8 @@ where
 mod tests {
 
     extern crate std;
+    use super::superblock::backends::uncompressed::*;
     use super::superblock::tests::*;
-    use super::superblock::uncompressed::*;
     use super::*;
 
     use std::boxed::Box;
