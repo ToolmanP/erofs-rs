@@ -16,7 +16,6 @@ use super::*;
 
 use core::mem::size_of;
 
-pub(crate) mod file;
 pub(crate) mod mem;
 
 /// The ondisk superblock structure.
