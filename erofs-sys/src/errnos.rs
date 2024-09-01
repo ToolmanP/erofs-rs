@@ -135,6 +135,25 @@ pub(crate) enum Errno {
     ENOTRECOVERABLE,
     ERFKILL,
     EHWPOISON,
+    EUNKNOWN,
+}
+
+impl From<i32> for Errno {
+    fn from(value: i32) -> Self {
+        if (-value) < 0 || (-value) > Errno::EUNKNOWN as i32 {
+            Errno::EUNKNOWN
+        } else {
+            // Safety: The value is guaranteed to be a valid errno and the memory
+            // layout is the same for both types.
+            unsafe { core::mem::transmute(value) }
+        }
+    }
+}
+
+impl From<Errno> for i32 {
+    fn from(value: Errno) -> Self {
+        -(value as i32)
+    }
 }
 
 #[cfg(test)]
