@@ -19,6 +19,7 @@ use core::mem::size_of;
 pub(crate) mod file;
 pub(crate) mod mem;
 
+/// The ondisk superblock structure.
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]
 pub(crate) struct SuperBlock {
@@ -48,7 +49,6 @@ pub(crate) struct SuperBlock {
     pub(crate) reserved: [u8; 23],
 }
 
-// SAFETY: SuperBlock uses all ffi-safe types.
 impl TryFrom<&[u8]> for SuperBlock {
     type Error = core::array::TryFromSliceError;
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
@@ -56,7 +56,6 @@ impl TryFrom<&[u8]> for SuperBlock {
     }
 }
 
-// SAFETY: SuperBlock uses all ffi-safe types.
 impl From<[u8; 128]> for SuperBlock {
     fn from(value: [u8; 128]) -> Self {
         Self {
@@ -116,7 +115,6 @@ where
     I: Inode,
 {
     fn superblock(&self) -> &SuperBlock;
-    fn device_info(&self) -> &DeviceInfo;
     fn backend(&self) -> &dyn Backend;
     fn blknr(&self, pos: Off) -> Blk {
         (pos >> self.superblock().blkszbits) as Blk
@@ -143,45 +141,8 @@ where
         self.blkpos(sb.meta_blkaddr) + ((nid as Off) << (5 as Off))
     }
 
-    fn read_inode_info(&self, nid: Nid) -> PosixResult<InodeInfo> {
-        let offset = self.iloc(nid);
-        let mut buf: ExtendedInodeInfoBuf = DEFAULT_INODE_BUF;
-        self.backend().fill(&mut buf, offset)?;
-        InodeInfo::try_from(buf)
-    }
-
-    fn xattr_infixes(&self) -> &Vec<XAttrInfix>;
-
-    // Currently we eagerly initialized all xattrs;
-    //
-    fn read_inode_xattrs_shared_entries(
-        &self,
-        nid: Nid,
-        info: &InodeInfo,
-    ) -> PosixResult<XAttrSharedEntries> {
-        let mut offset = self.iloc(nid) + info.inode_size();
-
-        let mut buf = XATTR_ENTRY_SUMMARY_BUF;
-        let mut indexes: Vec<u32> = Vec::new();
-        self.backend().fill(&mut buf, offset)?;
-        let header: XAttrSharedEntrySummary = XAttrSharedEntrySummary::from(buf);
-        offset += size_of::<XAttrSharedEntrySummary>() as Off;
-
-        for buf in self.continous_iter(offset, (header.shared_count << 2) as Off)? {
-            let data = buf?;
-            extend_from_slice(&mut indexes, unsafe {
-                core::slice::from_raw_parts(
-                    data.content().as_ptr().cast(),
-                    data.content().len() >> 2,
-                )
-            })?;
-        }
-        Ok(XAttrSharedEntries {
-            name_filter: header.name_filter,
-            shared_indexes: indexes,
-        })
-    }
-
+    // block map goes here.
+    fn device_info(&self) -> &DeviceInfo;
     fn flatmap(&self, inode: &I, offset: Off, inline: bool) -> MapResult {
         let nblocks = self.blk_round_up(inode.info().file_size());
         let blkaddr = match inode.info().spec() {
@@ -324,6 +285,26 @@ where
         len: Off,
     ) -> PosixResult<Box<dyn ContinousBufferIter<'a> + 'a>>;
 
+    // Inode related goes here.
+    fn read_inode_info(&self, nid: Nid) -> PosixResult<InodeInfo> {
+        let offset = self.iloc(nid);
+        let mut buf: ExtendedInodeInfoBuf = DEFAULT_INODE_BUF;
+        self.backend().fill(&mut buf, offset)?;
+        InodeInfo::try_from(buf)
+    }
+
+    fn find_nid(&self, inode: &I, name: &str) -> PosixResult<Option<Nid>> {
+        for buf in self.mapped_iter(inode, 0)? {
+            for dirent in buf?.iter_dir() {
+                if dirent.dirname() == name.as_bytes() {
+                    return Ok(Some(dirent.desc.nid));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    // Readdir related goes here.
     fn fill_dentries(
         &self,
         inode: &I,
@@ -363,17 +344,34 @@ where
         Ok(())
     }
 
-    fn find_nid(&self, inode: &I, name: &str) -> PosixResult<Option<Nid>> {
-        for buf in self.mapped_iter(inode, 0)? {
-            for dirent in buf?.iter_dir() {
-                if dirent.dirname() == name.as_bytes() {
-                    return Ok(Some(dirent.desc.nid));
-                }
-            }
+    // Extended attributes goes here.
+    fn xattr_infixes(&self) -> &Vec<XAttrInfix>;
+    // Currently we eagerly initialized all xattrs;
+    fn read_inode_xattrs_shared_entries(
+        &self,
+        nid: Nid,
+        info: &InodeInfo,
+    ) -> PosixResult<XAttrSharedEntries> {
+        let mut offset = self.iloc(nid) + info.inode_size();
+        let mut buf = XATTR_ENTRY_SUMMARY_BUF;
+        let mut indexes: Vec<u32> = Vec::new();
+        self.backend().fill(&mut buf, offset)?;
+        let header: XAttrSharedEntrySummary = XAttrSharedEntrySummary::from(buf);
+        offset += size_of::<XAttrSharedEntrySummary>() as Off;
+        for buf in self.continous_iter(offset, (header.shared_count << 2) as Off)? {
+            let data = buf?;
+            extend_from_slice(&mut indexes, unsafe {
+                core::slice::from_raw_parts(
+                    data.content().as_ptr().cast(),
+                    data.content().len() >> 2,
+                )
+            })?;
         }
-        Ok(None)
+        Ok(XAttrSharedEntries {
+            name_filter: header.name_filter,
+            shared_indexes: indexes,
+        })
     }
-
     fn get_xattr(
         &self,
         inode: &I,

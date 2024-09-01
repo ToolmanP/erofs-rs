@@ -1,6 +1,9 @@
 // Copyright 2024 Yiyang Wu
 // SPDX-License-Identifier: MIT or GPL-2.0-later
 
+// Because of the brain dead features of borrow-checker, it cannot statically analyze which part of the struct is exclusively borrowed.
+// Refactor out the real file operations, so that we can make sure things will get compiled.
+
 use alloc::vec::Vec;
 
 use super::alloc_helper::*;
@@ -9,9 +12,6 @@ use super::inode::*;
 use super::superblock::*;
 use super::xattrs::*;
 use super::*;
-
-// Because of the brain dead features of borrow-checker, it cannot statically analyze which part of the struct is exclusively borrowed.
-// Refactor out the real file operations, so that we can make sure things will get compiled.
 
 pub(crate) fn read_inode<'a, I, C>(
     filesystem: &'a dyn FileSystem<I>,

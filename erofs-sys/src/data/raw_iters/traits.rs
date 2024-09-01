@@ -1,5 +1,7 @@
 use super::super::*;
 
+/// Represents a basic iterator over a range of bytes from data backends.
+/// The access order is guided by the block maps from the filesystem.
 pub(crate) trait BufferMapIter<'a>:
     Iterator<Item = PosixResult<Box<dyn Buffer + 'a>>>
 {

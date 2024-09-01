@@ -37,6 +37,7 @@ pub(crate) struct XAttrSharedEntries {
     pub(crate) shared_indexes: Vec<u32>,
 }
 
+/// Represents the name index for infixes or prefixes.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(crate) struct XattrNameIndex(u8);
@@ -121,6 +122,7 @@ pub(crate) const EROFS_XATTRS_PREFIXS: [&[u8]; 7] = [
     b"security.",
 ];
 
+/// Represents the value of an xattr entry or the size of it if the buffer is present in the query.
 #[derive(Debug)]
 pub(crate) enum XAttrValue {
     Buffer(usize),
