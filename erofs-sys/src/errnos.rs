@@ -140,7 +140,7 @@ pub(crate) enum Errno {
 
 impl From<i32> for Errno {
     fn from(value: i32) -> Self {
-        if (-value) < 0 || (-value) > Errno::EUNKNOWN as i32 {
+        if (-value) <= 0 || (-value) > Errno::EUNKNOWN as i32 {
             Errno::EUNKNOWN
         } else {
             // Safety: The value is guaranteed to be a valid errno and the memory
@@ -163,16 +163,27 @@ impl From<Errno> for *const core::ffi::c_void {
     }
 }
 
-/// Replacement for PTR_ERR in Linux Kernel.
-impl From<*const core::ffi::c_void> for Errno {
-    fn from(value: *const core::ffi::c_void) -> Self {
-        (value as i32).into()
+impl From<Errno> for *mut core::ffi::c_void {
+    fn from(value: Errno) -> Self {
+        (-(value as core::ffi::c_long)) as *mut core::ffi::c_void
     }
 }
 
+/// Replacement for PTR_ERR in Linux Kernel.
+impl From<*const core::ffi::c_void> for Errno {
+    fn from(value: *const core::ffi::c_void) -> Self {
+        (-(value as i32)).into()
+    }
+}
+
+impl From<*mut core::ffi::c_void> for Errno {
+    fn from(value: *mut core::ffi::c_void) -> Self {
+        (-(value as i32)).into()
+    }
+}
 /// Replacement for IS_ERR in Linux Kernel.
 #[inline(always)]
-fn is_value_err(value: *const core::ffi::c_void) -> bool {
+pub(crate) fn is_value_err(value: *const core::ffi::c_void) -> bool {
     (value as core::ffi::c_ulong) >= (-4095 as core::ffi::c_long) as core::ffi::c_ulong
 }
 
