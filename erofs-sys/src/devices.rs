@@ -6,6 +6,7 @@ use super::data::raw_iters::*;
 use super::*;
 use alloc::vec::Vec;
 
+/// Device specification.
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct DeviceSpec {
     pub(crate) tags: [u8; 64],
@@ -13,6 +14,7 @@ pub(crate) struct DeviceSpec {
     pub(crate) mapped_blocks: u32,
 }
 
+/// Device slot.
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
 pub(crate) struct DeviceSlot {
@@ -22,6 +24,7 @@ pub(crate) struct DeviceSlot {
     reserved: [u8; 56],
 }
 
+/// Device information.
 pub(crate) struct DeviceInfo {
     pub(crate) mask: u16,
     pub(crate) specs: Vec<DeviceSpec>,

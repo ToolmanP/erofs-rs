@@ -142,9 +142,10 @@ impl From<[u8; 8]> for ChunkIndex {
     }
 }
 
+/// Chunk format used for indicating the chunkbits and chunkindex.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ChunkFormat(u16);
+pub(crate) struct ChunkFormat(pub(crate) u16);
 
 impl ChunkFormat {
     pub(crate) fn is_chunkindex(&self) -> bool {
@@ -155,6 +156,7 @@ impl ChunkFormat {
     }
 }
 
+/// Chunk description which represents whether this file consists of compound chunks or raw chunks;
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ChunkDesc {
     ChunkIndex(ChunkIndex),
@@ -279,6 +281,7 @@ pub(crate) type CompactInodeInfoBuf = [u8; size_of::<CompactInodeInfo>()];
 pub(crate) type ExtendedInodeInfoBuf = [u8; size_of::<ExtendedInodeInfo>()];
 pub(crate) const DEFAULT_INODE_BUF: ExtendedInodeInfoBuf = [0; size_of::<ExtendedInodeInfo>()];
 
+/// The inode trait which represents the inode in the filesystem.
 pub(crate) trait Inode: Sized {
     fn new(
         _sb: &SuperBlock,
@@ -291,6 +294,7 @@ pub(crate) trait Inode: Sized {
     fn nid(&self) -> Nid;
 }
 
+/// Represents the error which occurs when trying to convert the inode.
 #[derive(Debug)]
 pub(crate) enum InodeError {
     VersionError,
@@ -351,6 +355,7 @@ impl TryFrom<ExtendedInodeInfoBuf> for InodeInfo {
     }
 }
 
+/// Represents the inode collection which is a hashmap of inodes.
 pub(crate) trait InodeCollection {
     type I: Inode + Sized;
 
