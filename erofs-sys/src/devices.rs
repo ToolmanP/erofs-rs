@@ -3,6 +3,7 @@
 
 use super::alloc_helper::*;
 use super::data::*;
+use super::*;
 use alloc::vec::Vec;
 
 #[derive(Copy, Clone, Debug)]
@@ -26,13 +27,16 @@ pub(crate) struct DeviceInfo {
     pub(crate) specs: Vec<DeviceSpec>,
 }
 
-pub(crate) fn get_device_infos<'a>(iter: &mut (dyn ContinousBufferIter<'a> + 'a)) -> DeviceInfo {
+pub(crate) fn get_device_infos<'a>(
+    iter: &mut (dyn ContinousBufferIter<'a> + 'a),
+) -> PosixResult<DeviceInfo> {
     let mut specs = Vec::new();
     for data in iter {
+        let buffer = data?;
         let slots = unsafe {
             core::slice::from_raw_parts(
-                data.content().as_ptr() as *const DeviceSlot,
-                data.content().len() >> 7,
+                buffer.content().as_ptr() as *const DeviceSlot,
+                buffer.content().len() >> 7,
             )
         };
         for slot in slots {
@@ -43,11 +47,11 @@ pub(crate) fn get_device_infos<'a>(iter: &mut (dyn ContinousBufferIter<'a> + 'a)
                     blocks: slot.blocks,
                     mapped_blocks: slot.mapped_blocks,
                 },
-            );
+            )?;
         }
     }
-    DeviceInfo {
+    Ok(DeviceInfo {
         mask: specs.len().next_power_of_two() as u16,
         specs,
-    }
+    })
 }

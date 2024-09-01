@@ -43,9 +43,4 @@ impl From<MapType> for u32 {
     }
 }
 
-#[derive(Debug)]
-pub(crate) enum MapError {
-    OutofBound,
-}
-
-pub(crate) type MapResult = Result<Map, MapError>;
+pub(crate) type MapResult = PosixResult<Map>;

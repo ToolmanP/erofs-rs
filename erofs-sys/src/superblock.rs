@@ -143,47 +143,51 @@ where
         self.blkpos(sb.meta_blkaddr) + ((nid as Off) << (5 as Off))
     }
 
-    fn read_inode_info(&self, nid: Nid) -> InodeInfo {
+    fn read_inode_info(&self, nid: Nid) -> PosixResult<InodeInfo> {
         let offset = self.iloc(nid);
         let mut buf: ExtendedInodeInfoBuf = DEFAULT_INODE_BUF;
-        self.backend().fill(&mut buf, offset).unwrap();
-        InodeInfo::try_from(buf).unwrap()
+        self.backend().fill(&mut buf, offset)?;
+        InodeInfo::try_from(buf)
     }
 
     fn xattr_infixes(&self) -> &Vec<xattrs::XAttrInfix>;
 
     // Currently we eagerly initialized all xattrs;
     //
-    fn read_inode_xattrs_shared_entries(&self, nid: Nid, info: &InodeInfo) -> XAttrSharedEntries {
+    fn read_inode_xattrs_shared_entries(
+        &self,
+        nid: Nid,
+        info: &InodeInfo,
+    ) -> PosixResult<XAttrSharedEntries> {
         let mut offset = self.iloc(nid) + info.inode_size();
 
         let mut buf = XATTR_ENTRY_SUMMARY_BUF;
         let mut indexes: Vec<u32> = Vec::new();
-        self.backend().fill(&mut buf, offset).unwrap();
+        self.backend().fill(&mut buf, offset)?;
         let header: XAttrSharedEntrySummary = XAttrSharedEntrySummary::from(buf);
         offset += size_of::<XAttrSharedEntrySummary>() as Off;
 
-        for buf in self.continous_iter(offset, (header.shared_count << 2) as Off) {
-            let data = buf.content();
+        for buf in self.continous_iter(offset, (header.shared_count << 2) as Off)? {
+            let data = buf?;
             extend_from_slice(&mut indexes, unsafe {
-                core::slice::from_raw_parts(data.as_ptr().cast(), data.len() >> 2)
-            });
+                core::slice::from_raw_parts(
+                    data.content().as_ptr().cast(),
+                    data.content().len() >> 2,
+                )
+            })?;
         }
-
-        XAttrSharedEntries {
+        Ok(XAttrSharedEntries {
             name_filter: header.name_filter,
             shared_indexes: indexes,
-        }
+        })
     }
+
     fn flatmap(&self, inode: &I, offset: Off, inline: bool) -> MapResult {
         let nblocks = self.blk_round_up(inode.info().file_size());
         let blkaddr = match inode.info().spec() {
-            Spec::Data(ds) => match ds {
-                DataSpec::RawBlk(blkaddr) => blkaddr,
-                _ => unimplemented!(),
-            },
-            _ => unimplemented!(),
-        };
+            Spec::Data(DataSpec::RawBlk(blkaddr)) => Ok(blkaddr),
+            _ => Err(Errno::EUCLEAN),
+        }?;
 
         let lastblk = if inline { nblocks - 1 } else { nblocks };
         if offset < self.blkpos(lastblk) {
@@ -214,18 +218,15 @@ where
                 map_type: MapType::Meta,
             })
         } else {
-            Err(MapError::OutofBound)
+            Err(Errno::EUCLEAN)
         }
     }
 
     fn chunk_map(&self, inode: &I, offset: Off) -> MapResult {
         let chunkformat = match inode.info().spec() {
-            Spec::Data(dataspec) => match dataspec {
-                DataSpec::Chunk(chunkformat) => chunkformat,
-                _ => unimplemented!(),
-            },
-            _ => unimplemented!(),
-        };
+            Spec::Data(DataSpec::Chunk(chunkformat)) => Ok(chunkformat),
+            _ => Err(Errno::EUCLEAN),
+        }?;
 
         let chunkbits = (chunkformat.chunkbits() + self.superblock().blkszbits as u16) as Off;
         let chunknr = offset >> chunkbits;
@@ -242,11 +243,11 @@ where
                 unit
             );
             let mut buf = [0u8; size_of::<ChunkIndex>()];
-            self.backend().fill(&mut buf, pos).unwrap();
+            self.backend().fill(&mut buf, pos)?;
             let chunk_index = ChunkIndex::from(buf);
 
             if chunk_index.blkaddr == u32::MAX {
-                Err(MapError::OutofBound)
+                Err(Errno::EUCLEAN)
             } else {
                 Ok(Map {
                     logical: Segment {
@@ -273,11 +274,11 @@ where
                 unit
             );
             let mut buf = [0u8; 4];
-            self.backend().fill(&mut buf, pos).unwrap();
+            self.backend().fill(&mut buf, pos)?;
             let blkaddr = u32::from_le_bytes(buf);
             let len = (1 << chunkbits).min(inode.info().file_size() - offset);
             if blkaddr == u32::MAX {
-                Err(MapError::OutofBound)
+                Err(Errno::EUCLEAN)
             } else {
                 Ok(Map {
                     logical: Segment {
@@ -315,21 +316,29 @@ where
         &'a self,
         inode: &'b I,
         offset: Off,
-    ) -> Box<dyn BufferMapIter<'a> + 'b>;
+    ) -> PosixResult<Box<dyn BufferMapIter<'a> + 'b>>;
 
-    fn continous_iter<'a>(&'a self, offset: Off, len: Off)
-        -> Box<dyn ContinousBufferIter<'a> + 'a>;
+    fn continous_iter<'a>(
+        &'a self,
+        offset: Off,
+        len: Off,
+    ) -> PosixResult<Box<dyn ContinousBufferIter<'a> + 'a>>;
 
-    fn fill_dentries(&self, inode: &I, offset: Off, emitter: &mut dyn FnMut(Dirent<'_>, Off)) {
+    fn fill_dentries(
+        &self,
+        inode: &I,
+        offset: Off,
+        emitter: &mut dyn FnMut(Dirent<'_>, Off),
+    ) -> PosixResult<()> {
         if offset > inode.info().file_size() {
-            return;
+            return PosixResult::Err(Errno::EUCLEAN);
         }
 
         let map_offset = round!(DOWN, offset, self.blksz());
         let blk_offset = round!(UP, self.blkoff(offset), size_of::<DirentDesc>() as Off);
 
-        let mut map_iter = self.mapped_iter(inode, map_offset);
-        let first_buf = map_iter.next().unwrap();
+        let mut map_iter = self.mapped_iter(inode, map_offset)?;
+        let first_buf = map_iter.next().unwrap()?;
         let mut collection = first_buf.iter_dir();
 
         let mut pos: Off = map_offset + blk_offset;
@@ -345,23 +354,24 @@ where
         pos = round!(UP, pos, self.blksz());
 
         for buf in map_iter {
-            for dirent in buf.iter_dir() {
+            for dirent in buf?.iter_dir() {
                 emitter(dirent, pos);
                 pos += size_of::<DirentDesc>() as Off;
             }
             pos = round!(UP, pos, self.blksz());
         }
+        Ok(())
     }
 
-    fn find_nid(&self, inode: &I, name: &str) -> Option<Nid> {
-        for buf in self.mapped_iter(inode, 0) {
-            for dirent in buf.iter_dir() {
+    fn find_nid(&self, inode: &I, name: &str) -> PosixResult<Option<Nid>> {
+        for buf in self.mapped_iter(inode, 0)? {
+            for dirent in buf?.iter_dir() {
                 if dirent.dirname() == name.as_bytes() {
-                    return Some(dirent.desc.nid);
+                    return Ok(Some(dirent.desc.nid));
                 }
             }
         }
-        None
+        Ok(None)
     }
 
     fn get_xattr(
@@ -370,7 +380,7 @@ where
         index: u32,
         name: &[u8],
         buffer: &mut Option<&mut [u8]>,
-    ) -> XAttrResult {
+    ) -> PosixResult<XAttrValue> {
         let shared_count = inode.xattrs_shared_entries().shared_indexes.len();
 
         let inline_offset = self.iloc(inode.nid())
@@ -383,19 +393,23 @@ where
             - shared_count as Off * 4;
 
         if let Some(mut inline_provider) =
-            SkippableContinousIter::try_new(self.continous_iter(inline_offset, inline_len))
+            SkippableContinousIter::try_new(self.continous_iter(inline_offset, inline_len)?)?
         {
             while !inline_provider.eof() {
-                let header = inline_provider.get_entry_header();
-                let result = inline_provider.query_xattr_value(
+                let header = inline_provider.get_entry_header()?;
+                match inline_provider.query_xattr_value(
                     self.xattr_infixes(),
                     &header,
                     name,
                     index,
                     buffer,
-                );
-                if result.is_ok() {
-                    return result;
+                ) {
+                    Ok(value) => return Ok(value),
+                    Err(e) => {
+                        if e != Errno::ENODATA {
+                            return Err(e);
+                        }
+                    }
                 }
             }
         }
@@ -404,25 +418,29 @@ where
             let mut shared_provider = SkippableContinousIter::try_new(self.continous_iter(
                 self.blkpos(self.superblock().xattr_blkaddr) + (*entry_index as Off) * 4,
                 u64::MAX,
-            ))
+            )?)?
             .unwrap();
-            let header = shared_provider.get_entry_header();
-            let result = shared_provider.query_xattr_value(
+            let header = shared_provider.get_entry_header()?;
+            match shared_provider.query_xattr_value(
                 self.xattr_infixes(),
                 &header,
                 name,
                 index,
                 buffer,
-            );
-            if result.is_ok() {
-                return result;
+            ) {
+                Ok(value) => return Ok(value),
+                Err(e) => {
+                    if e != Errno::ENODATA {
+                        return Err(e);
+                    }
+                }
             }
         }
 
-        Err(XAttrError::NotFound)
+        PosixResult::Err(Errno::ENODATA)
     }
 
-    fn list_xattrs(&self, inode: &I, buffer: &mut [u8]) -> usize {
+    fn list_xattrs(&self, inode: &I, buffer: &mut [u8]) -> PosixResult<usize> {
         let shared_count = inode.xattrs_shared_entries().shared_indexes.len();
         let inline_offset = self.iloc(inode.nid())
             + inode.info().inode_size() as Off
@@ -434,16 +452,16 @@ where
             - shared_count as Off * 4;
 
         if let Some(mut inline_provider) =
-            SkippableContinousIter::try_new(self.continous_iter(inline_offset, inline_len))
+            SkippableContinousIter::try_new(self.continous_iter(inline_offset, inline_len)?)?
         {
             while !inline_provider.eof() {
-                let header = inline_provider.get_entry_header();
+                let header = inline_provider.get_entry_header()?;
                 offset += inline_provider.get_xattr_key(
                     self.xattr_infixes(),
                     &header,
                     &mut buffer[offset..],
-                );
-                inline_provider.skip_xattr_value(&header);
+                )?;
+                inline_provider.skip_xattr_value(&header)?;
             }
         }
 
@@ -451,13 +469,16 @@ where
             let mut shared_provider = SkippableContinousIter::try_new(self.continous_iter(
                 self.blkpos(self.superblock().xattr_blkaddr) + (*index as Off) * 4,
                 u64::MAX,
-            ))
+            )?)?
             .unwrap();
-            let header = shared_provider.get_entry_header();
-            offset +=
-                shared_provider.get_xattr_key(self.xattr_infixes(), &header, &mut buffer[offset..]);
+            let header = shared_provider.get_entry_header()?;
+            offset += shared_provider.get_xattr_key(
+                self.xattr_infixes(),
+                &header,
+                &mut buffer[offset..],
+            )?;
         }
-        offset
+        Ok(offset)
     }
 }
 
@@ -538,13 +559,13 @@ pub(crate) mod tests {
         const LIPSUM_HEX: [u8;64] = hex!("6846740fd4c03c86524d39e0012ec8eb1e4b87e8a90c65227904148bc0e4d0592c209151a736946133cd57f7ec59c4e8a445e7732322dda9ce356f8d0100c4ca");
         const LIPSUM_FILE_SIZE: u64 = 5060;
         const LIPSUM_TYPE: Type = Type::Regular;
-        let inode = ilookup(&*sbi.filesystem, &mut sbi.inodes, "/texts/lipsum.txt").unwrap();
+        let inode = lookup(&*sbi.filesystem, &mut sbi.inodes, "/texts/lipsum.txt").unwrap();
         assert_eq!(inode.info().inode_type(), LIPSUM_TYPE);
         assert_eq!(inode.info().file_size(), LIPSUM_FILE_SIZE);
 
         let mut hasher = Sha512::new();
-        for block in sbi.filesystem.mapped_iter(inode, 0) {
-            hasher.update(block.content());
+        for block in sbi.filesystem.mapped_iter(inode, 0).unwrap() {
+            hasher.update(block.unwrap().content());
         }
         let result = hasher.finalize();
         assert_eq!(result[..], LIPSUM_HEX);
@@ -554,7 +575,7 @@ pub(crate) mod tests {
         const README_CHECKSUM: [u8; 64] = hex!("99fffc75aec028f417d9782fffed6c5d877a29ad1b16fc62bfeb168cdaf8db6db2bad1814904cd0fa18a2396c2c618041682a010601f4052b9895138d4ed6f16");
         const README_FILE_SIZE: u64 = 38;
         const README_TYPE: Type = Type::Regular;
-        let inode = ilookup(&*sbi.filesystem, &mut sbi.inodes, "/README.md").unwrap();
+        let inode = lookup(&*sbi.filesystem, &mut sbi.inodes, "/README.md").unwrap();
         assert_eq!(inode.info().inode_type(), README_TYPE);
         assert_eq!(inode.info().file_size(), README_FILE_SIZE);
         let map = sbi.filesystem.map(inode, 0).unwrap();
@@ -563,8 +584,9 @@ pub(crate) mod tests {
         for block in sbi
             .filesystem
             .continous_iter(map.physical.start, map.physical.len)
+            .unwrap()
         {
-            hasher.update(block.content());
+            hasher.update(block.unwrap().content());
         }
         let result = hasher.finalize();
         assert_eq!(result[..], README_CHECKSUM);
@@ -574,7 +596,7 @@ pub(crate) mod tests {
         const README_SHA512_LITERAL: &[u8] = b"99fffc75aec028f417d9782fffed6c5d877a29ad1b16fc62bfeb168cdaf8db6db2bad1814904cd0fa18a2396c2c618041682a010601f4052b9895138d4ed6f16";
         const README_SHA512HMAC_LITERAL: &[u8] = b"45d111b7dc1799cc9c4f9989b301cac37c7ba66f5cfb559566c407f7f9476e2596b53d345045d426d9144eaabb9f55abb05f03b1ff44d69081831b19c87cb2d3";
 
-        let inode = ilookup(&*sbi.filesystem, &mut sbi.inodes, "/README.md").unwrap();
+        let inode = lookup(&*sbi.filesystem, &mut sbi.inodes, "/README.md").unwrap();
 
         {
             let mut sha512 = [0u8; 128];
@@ -609,21 +631,21 @@ pub(crate) mod tests {
         assert!(sbi
             .filesystem
             .get_xattr(inode, 2, b"", &mut None)
-            .is_err_and(|x| x == XAttrError::NotFound));
+            .is_err_and(|x| x == Errno::ENODATA));
     }
 
     fn test_get_dir_xattr(sbi: &mut SimpleBufferedFileSystem) {
-        let inode = ilookup(&*sbi.filesystem, &mut sbi.inodes, "/").unwrap();
+        let inode = lookup(&*sbi.filesystem, &mut sbi.inodes, "/").unwrap();
         assert!(sbi
             .filesystem
             .get_xattr(inode, 2, b"", &mut None)
-            .is_err_and(|x| x == XAttrError::NotFound));
+            .is_err_and(|x| x == Errno::ENODATA));
     }
 
     fn test_list_xattr(sbi: &mut SimpleBufferedFileSystem) {
         let mut result = [0u8; 512];
-        let inode = ilookup(&*sbi.filesystem, &mut sbi.inodes, "/README.md").unwrap();
-        let length = sbi.filesystem.list_xattrs(inode, &mut result);
+        let inode = lookup(&*sbi.filesystem, &mut sbi.inodes, "/README.md").unwrap();
+        let length = sbi.filesystem.list_xattrs(inode, &mut result).unwrap();
         assert_eq!(
             &result[..length],
             b"user.sha512sum\0user.sha512hmac\0security.selinux\0"

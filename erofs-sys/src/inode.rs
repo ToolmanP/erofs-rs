@@ -187,6 +187,7 @@ impl Spec {
                 let chunkformat = u16::from_le_bytes([u[0], u[1]]);
                 Spec::Data(DataSpec::Chunk(ChunkFormat(chunkformat)))
             }
+            // We don't support compressed inlines or compressed chunks currently.
             _ => Spec::Unknown,
         }
     }
@@ -251,10 +252,7 @@ impl InodeInfo {
             0o40000 => Spec::data(u, self.format().layout()),
             0o100000 => Spec::data(u, self.format().layout()),
             0o120000 => Spec::data(u, self.format().layout()), // Real Data
-            0o10000 => Spec::Device(0),                        // FIFO
-            0o140000 => Spec::Device(0),                       // Socket
-            0o60000 => unimplemented!(),                       // Block
-            0o20000 => unimplemented!(),                       // Character
+            // We don't support device inodes currently.
             _ => Spec::Unknown,
         }
     }
@@ -296,16 +294,12 @@ pub(crate) trait Inode: Sized {
 #[derive(Debug)]
 pub(crate) enum InodeError {
     VersionError,
-    UnknownError,
+    PosixError(Errno),
 }
-
-type InodeResult<T> = Result<T, InodeError>;
 
 impl TryFrom<CompactInodeInfoBuf> for CompactInodeInfo {
     type Error = InodeError;
     fn try_from(value: CompactInodeInfoBuf) -> Result<Self, Self::Error> {
-        //SAFETY: all the types present are ffi-safe. safe to cast here since only [u8;64] could be
-        //passed into this function and it's definitely safe.
         let inode: CompactInodeInfo = Self {
             i_format: Format(u16::from_le_bytes(value[0..2].try_into().unwrap())),
             i_xattr_icount: u16::from_le_bytes(value[2..4].try_into().unwrap()),
@@ -323,23 +317,19 @@ impl TryFrom<CompactInodeInfoBuf> for CompactInodeInfo {
         match ifmt.version() {
             Version::Compat => Ok(inode),
             Version::Extended => Err(InodeError::VersionError),
-            _ => Err(InodeError::UnknownError),
+            _ => Err(InodeError::PosixError(Errno::EOPNOTSUPP)),
         }
     }
 }
 
 impl TryFrom<ExtendedInodeInfoBuf> for InodeInfo {
-    type Error = InodeError;
+    type Error = Errno;
     fn try_from(value: ExtendedInodeInfoBuf) -> Result<Self, Self::Error> {
         let compact_buf: CompactInodeInfoBuf = value[0..32].try_into().unwrap();
-        let r: Result<CompactInodeInfo, Self::Error> = CompactInodeInfo::try_from(compact_buf);
-
+        let r: Result<CompactInodeInfo, InodeError> = CompactInodeInfo::try_from(compact_buf);
         match r {
             Ok(compact) => Ok(InodeInfo::Compact(compact)),
             Err(e) => match e {
-                //SAFETY: Note that try_into will return VersionError. This suggests that current
-                //buffer contains the extended inode. Since the types used are FFI-safe, it's safe
-                //to transtmute it here.
                 InodeError::VersionError => Ok(InodeInfo::Extended(ExtendedInodeInfo {
                     i_format: Format(u16::from_le_bytes(value[0..2].try_into().unwrap())),
                     i_xattr_icount: u16::from_le_bytes(value[2..4].try_into().unwrap()),
@@ -355,7 +345,7 @@ impl TryFrom<ExtendedInodeInfoBuf> for InodeInfo {
                     i_nlink: u32::from_le_bytes(value[44..48].try_into().unwrap()),
                     i_reserved2: value[48..64].try_into().unwrap(),
                 })),
-                _ => Err(e),
+                InodeError::PosixError(e) => Err(e),
             },
         }
     }
@@ -364,7 +354,8 @@ impl TryFrom<ExtendedInodeInfoBuf> for InodeInfo {
 pub(crate) trait InodeCollection {
     type I: Inode + Sized;
 
-    fn iget(&mut self, nid: Nid, filesystem: &dyn FileSystem<Self::I>) -> &mut Self::I;
+    fn iget(&mut self, nid: Nid, filesystem: &dyn FileSystem<Self::I>)
+        -> PosixResult<&mut Self::I>;
 }
 
 #[cfg(test)]
@@ -412,14 +403,14 @@ pub(crate) mod tests {
 
     impl InodeCollection for HashMap<Nid, SimpleInode> {
         type I = SimpleInode;
-        fn iget(&mut self, nid: Nid, f: &dyn FileSystem<Self::I>) -> &mut Self::I {
-            let info = f.read_inode_info(nid);
-            let xattrs_header = f.read_inode_xattrs_shared_entries(nid, &info);
+        fn iget(&mut self, nid: Nid, f: &dyn FileSystem<Self::I>) -> PosixResult<&mut Self::I> {
             match self.entry(nid) {
                 Entry::Vacant(v) => {
-                    v.insert(Self::I::new(f.superblock(), info, nid, xattrs_header))
+                    let info = f.read_inode_info(nid)?;
+                    let xattrs_header = f.read_inode_xattrs_shared_entries(nid, &info)?;
+                    Ok(v.insert(Self::I::new(f.superblock(), info, nid, xattrs_header)))
                 }
-                Entry::Occupied(o) => o.into_mut(),
+                Entry::Occupied(o) => Ok(o.into_mut()),
             }
         }
     }

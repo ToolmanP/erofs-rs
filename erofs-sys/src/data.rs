@@ -13,25 +13,11 @@ use super::*;
 
 use crate::round;
 
-#[derive(Debug)]
-pub(crate) enum SourceError {
-    Dummy,
-    OutBound,
-}
-
-#[derive(Debug)]
-pub(crate) enum BackendError {
-    Dummy,
-}
-
-pub(crate) type SourceResult<T> = Result<T, SourceError>;
-pub(crate) type BackendResult<T> = Result<T, BackendError>;
-
 /// Represent some sort of generic data source. This cound be file, memory or even network.
 /// Note that users should never use this directly please use backends instead.
 pub(crate) trait Source {
-    fn fill(&self, data: &mut [u8], offset: Off) -> SourceResult<u64>;
-    fn get_temp_buffer(&self, offset: Off, maxsize: Off) -> SourceResult<TempBuffer> {
+    fn fill(&self, data: &mut [u8], offset: Off) -> PosixResult<u64>;
+    fn get_temp_buffer(&self, offset: Off, maxsize: Off) -> PosixResult<TempBuffer> {
         let mut block: TempBlock = EROFS_TEMP_BLOCK;
         let accessor = TempBlockAccessor::from(offset);
         self.fill(&mut block, accessor.base).map(|sz| {
@@ -50,16 +36,16 @@ pub(crate) trait FileSource: Source {}
 // Represents a memory source. Note that as_buf and as_buf_mut should only represent memory within
 // a page. Cross page memory is not supported and treated as an error.
 pub(crate) trait PageSource<'a>: Source {
-    fn as_buf(&'a self, offset: Off, len: Off) -> SourceResult<RefBuffer<'a>>;
-    fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> SourceResult<RefBufferMut<'a>>;
+    fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<RefBuffer<'a>>;
+    fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> PosixResult<RefBufferMut<'a>>;
 }
 
 /// Represents a generic data access backend that is backed by some sort of data source.
 /// This often has temporary buffers to decompress the data from the data source.
 /// The method signatures are the same as those of the Source trait.
 pub(crate) trait Backend {
-    fn fill(&self, data: &mut [u8], offset: Off) -> BackendResult<u64>;
-    fn get_temp_buffer(&self, offset: Off, maxsize: Off) -> BackendResult<TempBuffer>;
+    fn fill(&self, data: &mut [u8], offset: Off) -> PosixResult<u64>;
+    fn get_temp_buffer(&self, offset: Off, maxsize: Off) -> PosixResult<TempBuffer>;
 }
 
 /// Represents a file backend whose source is a file.
@@ -67,8 +53,8 @@ pub(crate) trait FileBackend: Backend {}
 
 /// Represents a memory backend whose source is memory.
 pub(crate) trait MemoryBackend<'a>: Backend {
-    fn as_buf(&'a self, offset: Off, len: Off) -> BackendResult<RefBuffer<'a>>;
-    fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> BackendResult<RefBufferMut<'a>>;
+    fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<RefBuffer<'a>>;
+    fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> PosixResult<RefBufferMut<'a>>;
 }
 
 /// Represents a TempBuffer which owns a temporary on-stack/on-heap buffer.
@@ -268,7 +254,10 @@ where
     }
 }
 
-pub(crate) trait BufferMapIter<'a>: Iterator<Item = Box<dyn Buffer + 'a>> {}
+pub(crate) trait BufferMapIter<'a>:
+    Iterator<Item = PosixResult<Box<dyn Buffer + 'a>>>
+{
+}
 
 pub(crate) struct TempBufferMapIter<'a, 'b, FS, B, I>
 where
@@ -297,7 +286,7 @@ where
     B: FileBackend,
     I: Inode,
 {
-    type Item = Box<dyn Buffer + 'a>;
+    type Item = PosixResult<Box<dyn Buffer + 'a>>;
     fn next(&mut self) -> Option<Self::Item> {
         match self.map_iter.next() {
             Some(m) => {
@@ -307,7 +296,10 @@ where
                         .backend
                         .fill(&mut block[0..m.physical.len as usize], m.physical.start)
                     {
-                        Ok(rlen) => Some(heap_alloc(TempBuffer::new(block, 0, rlen as usize))),
+                        Ok(rlen) => Some(
+                            heap_alloc(TempBuffer::new(block, 0, rlen as usize))
+                                .map(|v| v as Box<dyn Buffer + 'a>),
+                        ),
                         Err(_) => None,
                     }
                 } else {
@@ -315,7 +307,7 @@ where
                         .backend
                         .get_temp_buffer(m.physical.start, m.logical.len)
                     {
-                        Ok(buffer) => Some(heap_alloc(buffer)),
+                        Ok(buffer) => Some(heap_alloc(buffer).map(|v| v as Box<dyn Buffer + 'a>)),
                         Err(_) => None,
                     }
                 }
@@ -360,14 +352,14 @@ where
     B: MemoryBackend<'a>,
     I: Inode,
 {
-    type Item = Box<dyn Buffer + 'a>;
+    type Item = PosixResult<Box<dyn Buffer + 'a>>;
     fn next(&mut self) -> Option<Self::Item> {
         match self.map_iter.next() {
             Some(m) => match self
                 .backend
                 .as_buf(m.physical.start, m.physical.len.min(EROFS_TEMP_BLOCK_SZ))
             {
-                Ok(buf) => Some(heap_alloc(buf)),
+                Ok(buf) => Some(heap_alloc(buf).map(|v| v as Box<dyn Buffer + 'a>)),
                 Err(_) => None,
             },
             None => None,
@@ -409,7 +401,7 @@ impl<'a, B> Iterator for ContinuousTempBufferIter<'a, B>
 where
     B: FileBackend,
 {
-    type Item = Box<dyn Buffer + 'a>;
+    type Item = PosixResult<Box<dyn Buffer + 'a>>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.len == 0 {
             return None;
@@ -423,7 +415,7 @@ where
                 |buffer| {
                     self.offset += buffer.content().len() as Off;
                     self.len -= buffer.content().len() as Off;
-                    Some(heap_alloc(buffer) as Box<dyn Buffer + 'a>)
+                    Some(heap_alloc(buffer).map(|v| v as Box<dyn Buffer + 'a>))
                 },
             );
         result
@@ -456,7 +448,9 @@ where
 
 /// Represents a basic iterator over a range of bytes from data backends.
 /// Note that this is skippable and can be used to move the iterator's cursor forward.
-pub(crate) trait ContinousBufferIter<'a>: Iterator<Item = Box<dyn Buffer + 'a>> {
+pub(crate) trait ContinousBufferIter<'a>:
+    Iterator<Item = PosixResult<Box<dyn Buffer + 'a>>>
+{
     fn advance_off(&mut self, offset: Off);
     fn eof(&self) -> bool;
 }
@@ -478,7 +472,7 @@ impl<'a, B> Iterator for ContinuousRefIter<'a, B>
 where
     B: MemoryBackend<'a>,
 {
-    type Item = Box<dyn Buffer + 'a>;
+    type Item = PosixResult<Box<dyn Buffer + 'a>>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.len == 0 {
             return None;
@@ -491,7 +485,7 @@ where
             |x| {
                 self.offset += x.content().len() as Off;
                 self.len -= x.content().len() as Off;
-                Some(heap_alloc(x) as Box<dyn Buffer + 'a>)
+                Some(heap_alloc(x).map(|v| v as Box<dyn Buffer + 'a>))
             },
         );
         result
@@ -533,27 +527,38 @@ impl<'a> MetadataBufferIter<'a> {
 }
 
 impl<'a> Iterator for MetadataBufferIter<'a> {
-    type Item = Vec<u8>;
+    type Item = PosixResult<Vec<u8>>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.total == 0 {
             return None;
         }
 
         if self.buffer.start == self.buffer.maxsize {
-            self.buffer = self
+            match self
                 .backend
                 .get_temp_buffer(self.offset, EROFS_TEMP_BLOCK_SZ)
-                .unwrap();
+            {
+                Ok(buffer) => {
+                    self.buffer = buffer;
+                }
+                Err(e) => {
+                    return Some(Err(e));
+                }
+            }
             self.offset += self.buffer.maxsize as Off;
         }
 
         let data = self.buffer.content();
         let size = u16::from_le_bytes([data[0], data[1]]) as usize;
         let mut result: Vec<u8> = Vec::new();
-        extend_from_slice(&mut result, &data[2..size + 2]);
-        self.buffer.start = round!(UP, self.buffer.start + size + 2, 4);
-        self.total -= 1;
-        Some(result)
+        match extend_from_slice(&mut result, &data[2..size + 2]) {
+            Ok(()) => {
+                self.buffer.start = round!(UP, self.buffer.start + size + 2, 4);
+                self.total -= 1;
+                Some(Ok(result))
+            }
+            Err(e) => Some(Err(e)),
+        }
     }
 }
 
@@ -579,30 +584,45 @@ fn cmp_with_cursor_move(
     result
 }
 
-impl<'a> SkippableContinousIter<'a> {
-    pub(crate) fn try_new(mut iter: Box<dyn ContinousBufferIter<'a> + 'a>) -> Option<Self> {
-        if iter.eof() {
-            return None;
-        }
-        let data = iter.next().unwrap();
-        Some(Self { iter, data, cur: 0 })
-    }
-    pub(crate) fn skip(&mut self, offset: Off) {
-        let dlen = self.data.content().len() as Off - self.cur;
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum SkipCmpError {
+    PosixError(Errno),
+    NotEqual(Off),
+}
 
+impl From<Errno> for SkipCmpError {
+    fn from(e: Errno) -> Self {
+        SkipCmpError::PosixError(e)
+    }
+}
+
+impl<'a> SkippableContinousIter<'a> {
+    pub(crate) fn try_new(
+        mut iter: Box<dyn ContinousBufferIter<'a> + 'a>,
+    ) -> PosixResult<Option<Self>> {
+        if iter.eof() {
+            return Ok(None);
+        }
+        let data = iter.next().unwrap()?;
+        Ok(Some(Self { iter, data, cur: 0 }))
+    }
+    pub(crate) fn skip(&mut self, offset: Off) -> PosixResult<()> {
+        let dlen = self.data.content().len() as Off - self.cur;
         if offset <= dlen {
             self.cur += offset;
         } else {
             self.cur = 0;
             self.iter.advance_off(dlen);
-            self.data = self.iter.next().unwrap();
+            self.data = self.iter.next().unwrap()?;
         }
+        Ok(())
     }
 
-    pub(crate) fn read(&mut self, buf: &mut [u8]) {
+    pub(crate) fn read(&mut self, buf: &mut [u8]) -> PosixResult<()> {
         let mut dlen = self.data.content().len() as Off - self.cur;
         let mut bcur = 0 as Off;
         let blen = buf.len() as Off;
+
         if dlen != 0 && dlen >= blen {
             buf.clone_from_slice(
                 &self.data.content()[self.cur as usize..(self.cur + blen) as usize],
@@ -614,22 +634,23 @@ impl<'a> SkippableContinousIter<'a> {
             bcur += dlen;
             while bcur < blen {
                 self.cur = 0;
-                self.data = self.iter.next().unwrap();
+                self.data = self.iter.next().unwrap()?;
                 dlen = self.data.content().len() as Off;
                 if dlen >= blen - bcur {
                     buf[bcur as usize..]
                         .copy_from_slice(&self.data.content()[..(blen - bcur) as usize]);
                     self.cur = blen - bcur;
-                    return;
+                    return Ok(());
                 } else {
                     buf[bcur as usize..(bcur + dlen) as usize].copy_from_slice(self.data.content());
                     bcur += dlen;
                 }
             }
         }
+        Ok(())
     }
 
-    pub(crate) fn try_cmp(&mut self, buf: &[u8]) -> Result<(), u64> {
+    pub(crate) fn try_cmp(&mut self, buf: &[u8]) -> Result<(), SkipCmpError> {
         let dlen = self.data.content().len() as Off - self.cur;
         let blen = buf.len() as Off;
         let mut bcur = 0 as Off;
@@ -638,22 +659,22 @@ impl<'a> SkippableContinousIter<'a> {
             if cmp_with_cursor_move(self.data.content(), buf, &mut self.cur, &mut bcur, blen) {
                 Ok(())
             } else {
-                Err(bcur)
+                Err(SkipCmpError::NotEqual(bcur))
             }
         } else {
             if dlen != 0 {
                 let clen = dlen.min(blen);
                 if !cmp_with_cursor_move(self.data.content(), buf, &mut self.cur, &mut bcur, clen) {
-                    return Err(bcur);
+                    return Err(SkipCmpError::NotEqual(bcur));
                 }
             }
             while bcur < blen {
                 self.cur = 0;
-                self.data = self.iter.next().unwrap();
+                self.data = self.iter.next().unwrap()?;
                 let dlen = self.data.content().len() as Off;
                 let clen = dlen.min(blen - bcur);
                 if !cmp_with_cursor_move(self.data.content(), buf, &mut self.cur, &mut bcur, clen) {
-                    return Err(bcur);
+                    return Err(SkipCmpError::NotEqual(bcur));
                 }
             }
 

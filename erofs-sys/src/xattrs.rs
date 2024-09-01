@@ -121,31 +121,22 @@ pub(crate) const EROFS_XATTRS_PREFIXS: [&[u8]; 7] = [
     b"security.",
 ];
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub(crate) enum XAttrError {
-    NotFound,
-    NotMatched,
-    Invalid,
-}
-
 #[derive(Debug)]
 pub(crate) enum XAttrValue {
     Buffer(usize),
     Vec(Vec<u8>),
 }
 
-pub(crate) type XAttrResult = Result<XAttrValue, XAttrError>;
-
 /// An iterator to read xattrs by comparing the entry's name one by one and reads its value
 /// correspondingly.
 pub(crate) trait XAttrEntriesProvider {
-    fn get_entry_header(&mut self) -> XAttrEntryHeader;
+    fn get_entry_header(&mut self) -> PosixResult<XAttrEntryHeader>;
     fn get_xattr_key(
         &mut self,
         pfs: &[XAttrInfix],
         header: &XAttrEntryHeader,
         buffer: &mut [u8],
-    ) -> usize;
+    ) -> PosixResult<usize>;
     fn query_xattr_value(
         &mut self,
         pfs: &[XAttrInfix],
@@ -153,14 +144,13 @@ pub(crate) trait XAttrEntriesProvider {
         name: &[u8],
         index: u32,
         buffer: &mut Option<&mut [u8]>,
-    ) -> XAttrResult;
-    fn skip_xattr_value(&mut self, header: &XAttrEntryHeader);
+    ) -> PosixResult<XAttrValue>;
+    fn skip_xattr_value(&mut self, header: &XAttrEntryHeader) -> PosixResult<()>;
 }
 impl<'a> XAttrEntriesProvider for SkippableContinousIter<'a> {
-    fn get_entry_header(&mut self) -> XAttrEntryHeader {
+    fn get_entry_header(&mut self) -> PosixResult<XAttrEntryHeader> {
         let mut buf: [u8; 4] = [0; 4];
-        self.read(&mut buf);
-        XAttrEntryHeader::from(buf)
+        self.read(&mut buf).map(|_| XAttrEntryHeader::from(buf))
     }
 
     fn get_xattr_key(
@@ -168,7 +158,7 @@ impl<'a> XAttrEntriesProvider for SkippableContinousIter<'a> {
         ifs: &[XAttrInfix],
         header: &XAttrEntryHeader,
         buffer: &mut [u8],
-    ) -> usize {
+    ) -> PosixResult<usize> {
         let mut cur = if header.name_index.is_long() {
             let if_index: usize = header.name_index.into();
             let infix: &XAttrInfix = ifs.get(if_index).unwrap();
@@ -189,10 +179,10 @@ impl<'a> XAttrEntriesProvider for SkippableContinousIter<'a> {
             plen
         };
 
-        self.read(&mut buffer[cur..cur + header.suffix_len as usize]);
+        self.read(&mut buffer[cur..cur + header.suffix_len as usize])?;
         cur += header.suffix_len as usize;
         buffer[cur] = b'\0';
-        cur + 1
+        Ok(cur + 1)
     }
 
     fn query_xattr_value(
@@ -202,7 +192,7 @@ impl<'a> XAttrEntriesProvider for SkippableContinousIter<'a> {
         name: &[u8],
         index: u32,
         buffer: &mut Option<&mut [u8]>,
-    ) -> XAttrResult {
+    ) -> PosixResult<XAttrValue> {
         let xattr_size = round!(
             UP,
             header.suffix_len as Off + header.value_len as Off,
@@ -213,7 +203,7 @@ impl<'a> XAttrEntriesProvider for SkippableContinousIter<'a> {
             let if_index: usize = header.name_index.into();
 
             if if_index >= ifs.len() {
-                return Err(XAttrError::Invalid);
+                return Err(Errno::ENODATA);
             }
 
             let infix = ifs.get(if_index).unwrap();
@@ -222,24 +212,24 @@ impl<'a> XAttrEntriesProvider for SkippableContinousIter<'a> {
             let pf_index = infix.prefix_index();
 
             if pf_index >= EROFS_XATTRS_PREFIXS.len() as u8 {
-                return Err(XAttrError::Invalid);
+                return Err(Errno::ENODATA);
             }
 
             if index != pf_index as u32
                 || name.len() != ilen + header.suffix_len as usize
                 || name[..ilen] != *infix.name()
             {
-                return Err(XAttrError::NotMatched);
+                return Err(Errno::ENODATA);
             }
             ilen
         } else {
             let pf_index: usize = header.name_index.into();
             if pf_index >= EROFS_XATTRS_PREFIXS.len() {
-                return Err(XAttrError::Invalid);
+                return Err(Errno::ENODATA);
             }
 
             if pf_index != index as usize || header.suffix_len as usize != name.len() {
-                return Err(XAttrError::NotMatched);
+                return Err(Errno::ENODATA);
             }
             0
         };
@@ -247,28 +237,34 @@ impl<'a> XAttrEntriesProvider for SkippableContinousIter<'a> {
         match self.try_cmp(&name[cur..]) {
             Ok(()) => match buffer.as_mut() {
                 Some(b) => {
-                    self.read(&mut b[..header.value_len as usize]);
+                    if b.len() < header.value_len as usize {
+                        return Err(Errno::ERANGE);
+                    }
+                    self.read(&mut b[..header.value_len as usize])?;
                     Ok(XAttrValue::Buffer(header.value_len as usize))
                 }
                 None => {
-                    let mut b: Vec<u8> = vec_with_capacity(header.value_len as usize);
-                    self.read(&mut b);
+                    let mut b: Vec<u8> = vec_with_capacity(header.value_len as usize)?;
+                    self.read(&mut b)?;
                     Ok(XAttrValue::Vec(b))
                 }
             },
-            Err(nvalue) => {
-                self.skip(xattr_size - nvalue as Off);
-                Err(XAttrError::NotMatched)
-            }
+            Err(skip_err) => match skip_err {
+                SkipCmpError::NotEqual(nvalue) => {
+                    self.skip(xattr_size - nvalue)?;
+                    Err(Errno::ENODATA)
+                }
+                SkipCmpError::PosixError(e) => Err(e),
+            },
         }
     }
-    fn skip_xattr_value(&mut self, header: &XAttrEntryHeader) {
+    fn skip_xattr_value(&mut self, header: &XAttrEntryHeader) -> PosixResult<()> {
         self.skip(
             round!(
                 UP,
                 header.suffix_len as Off + header.value_len as Off,
                 size_of::<XAttrEntryHeader>() as Off
             ) - header.suffix_len as Off,
-        );
+        )
     }
 }

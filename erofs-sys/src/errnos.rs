@@ -1,6 +1,7 @@
 #[repr(i32)]
 #[non_exhaustive]
 #[allow(clippy::upper_case_acronyms)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub(crate) enum Errno {
     NONE = 0,
     EPERM,

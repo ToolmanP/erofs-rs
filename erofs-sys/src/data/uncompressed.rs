@@ -14,16 +14,11 @@ impl<T> Backend for UncompressedBackend<T>
 where
     T: Source,
 {
-    fn fill(&self, data: &mut [u8], offset: Off) -> BackendResult<u64> {
-        self.source
-            .fill(data, offset)
-            .map_or_else(|_| Err(BackendError::Dummy), Ok)
+    fn fill(&self, data: &mut [u8], offset: Off) -> PosixResult<u64> {
+        self.source.fill(data, offset)
     }
-    fn get_temp_buffer(&self, offset: Off, maxsize: Off) -> BackendResult<TempBuffer> {
-        match self.source.get_temp_buffer(offset, maxsize) {
-            Ok(buffer) => Ok(buffer),
-            Err(_) => Err(BackendError::Dummy),
-        }
+    fn get_temp_buffer(&self, offset: Off, maxsize: Off) -> PosixResult<TempBuffer> {
+        self.source.get_temp_buffer(offset, maxsize)
     }
 }
 
@@ -33,15 +28,11 @@ impl<'a, T> MemoryBackend<'a> for UncompressedBackend<T>
 where
     T: PageSource<'a>,
 {
-    fn as_buf(&'a self, offset: Off, len: Off) -> BackendResult<RefBuffer<'a>> {
-        self.source
-            .as_buf(offset, len)
-            .map_err(|_| BackendError::Dummy)
+    fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<RefBuffer<'a>> {
+        self.source.as_buf(offset, len)
     }
-    fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> BackendResult<RefBufferMut<'a>> {
-        self.source
-            .as_buf_mut(offset, len)
-            .map_err(|_| BackendError::Dummy)
+    fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> PosixResult<RefBufferMut<'a>> {
+        self.source.as_buf_mut(offset, len)
     }
 }
 

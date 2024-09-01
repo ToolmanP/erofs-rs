@@ -32,18 +32,20 @@ where
         &'a self,
         inode: &'b I,
         offset: Off,
-    ) -> Box<dyn BufferMapIter<'a> + 'b> {
+    ) -> PosixResult<Box<dyn BufferMapIter<'a> + 'b>> {
         heap_alloc(TempBufferMapIter::new(
             &self.backend,
             MapIter::new(self, inode, offset),
         ))
+        .map(|v| v as Box<dyn BufferMapIter<'a> + 'b>)
     }
     fn continous_iter<'a>(
         &'a self,
         offset: Off,
         len: Off,
-    ) -> Box<dyn ContinousBufferIter<'a> + 'a> {
+    ) -> PosixResult<Box<dyn ContinousBufferIter<'a> + 'a>> {
         heap_alloc(ContinuousTempBufferIter::new(&self.backend, offset, len))
+            .map(|v| v as Box<dyn ContinousBufferIter<'a> + 'a>)
     }
     fn xattr_infixes(&self) -> &Vec<XAttrInfix> {
         &self.infixes
@@ -57,22 +59,22 @@ impl<T> ImageFileSystem<T>
 where
     T: FileBackend,
 {
-    pub(crate) fn new(backend: T) -> Self {
+    pub(crate) fn try_new(backend: T) -> PosixResult<Self> {
         let mut buf = SUPERBLOCK_EMPTY_BUF;
-        backend.fill(&mut buf, EROFS_SUPER_OFFSET).unwrap();
+        backend.fill(&mut buf, EROFS_SUPER_OFFSET)?;
         let sb: SuperBlock = buf.into();
-        let infixes = get_xattr_infixes(&sb, &backend);
+        let infixes = get_xattr_infixes(&sb, &backend)?;
         let device_info = get_device_infos(&mut ContinuousTempBufferIter::new(
             &backend,
             sb.devt_slotoff as Off * 128,
             sb.extra_devices as Off * 128,
-        ));
-        Self {
+        ))?;
+        Ok(Self {
             backend,
             sb,
             infixes,
             device_info,
-        }
+        })
     }
 }
 
@@ -90,9 +92,9 @@ mod tests {
     use std::os::unix::fs::FileExt;
 
     impl Source for File {
-        fn fill(&self, data: &mut [u8], offset: Off) -> SourceResult<u64> {
+        fn fill(&self, data: &mut [u8], offset: Off) -> PosixResult<u64> {
             self.read_at(data, offset)
-                .map_or(Err(SourceError::Dummy), |size| Ok(size as u64))
+                .map_or(Err(Errno::ERANGE), |size| Ok(size as u64))
         }
     }
 
@@ -102,7 +104,7 @@ mod tests {
     fn test_uncompressed_img_filesystem() {
         for file in load_fixtures() {
             let mut sbi: SimpleBufferedFileSystem = SuperblockInfo::new(
-                Box::new(ImageFileSystem::new(UncompressedBackend::new(file))),
+                Box::new(ImageFileSystem::try_new(UncompressedBackend::new(file)).unwrap()),
                 HashMap::new(),
                 (),
             );

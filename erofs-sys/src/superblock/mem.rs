@@ -34,18 +34,20 @@ where
         &'a self,
         inode: &'b I,
         offset: Off,
-    ) -> Box<dyn BufferMapIter<'a> + 'b> {
+    ) -> PosixResult<Box<dyn BufferMapIter<'a> + 'b>> {
         heap_alloc(RefMapIter::new(
             &self.backend,
             MapIter::new(self, inode, offset),
         ))
+        .map(|v| v as Box<dyn BufferMapIter<'a> + 'b>)
     }
     fn continous_iter<'a>(
         &'a self,
         offset: Off,
         len: Off,
-    ) -> Box<dyn ContinousBufferIter<'a> + 'a> {
+    ) -> PosixResult<Box<dyn ContinousBufferIter<'a> + 'a>> {
         heap_alloc(ContinuousRefIter::new(&self.backend, offset, len))
+            .map(|v| v as Box<dyn ContinousBufferIter<'a> + 'a>)
     }
     fn xattr_infixes(&self) -> &Vec<XAttrInfix> {
         &self.infixes
@@ -59,22 +61,22 @@ impl<T> MemFileSystem<T>
 where
     T: for<'a> MemoryBackend<'a>,
 {
-    pub(crate) fn new(backend: T) -> Self {
+    pub(crate) fn try_new(backend: T) -> PosixResult<Self> {
         let mut buf = SUPERBLOCK_EMPTY_BUF;
-        backend.fill(&mut buf, EROFS_SUPER_OFFSET).unwrap();
+        backend.fill(&mut buf, EROFS_SUPER_OFFSET)?;
         let sb: SuperBlock = buf.into();
-        let infixes = get_xattr_infixes(&sb, &backend);
+        let infixes = get_xattr_infixes(&sb, &backend)?;
         let device_info = get_device_infos(&mut ContinuousRefIter::new(
             &backend,
             sb.devt_slotoff as Off * 128,
             sb.extra_devices as Off * 128,
-        ));
-        Self {
+        ))?;
+        Ok(Self {
             backend,
             sb,
             infixes,
             device_info,
-        }
+        })
     }
 }
 
@@ -92,7 +94,7 @@ mod tests {
 
     // Impl MmapMut to simulate a in-memory image/filesystem
     impl Source for MmapMut {
-        fn fill(&self, data: &mut [u8], offset: Off) -> SourceResult<u64> {
+        fn fill(&self, data: &mut [u8], offset: Off) -> PosixResult<u64> {
             self.as_buf(offset, data.len() as u64).map(|buf| {
                 let len = buf.content().len();
                 data[..len].clone_from_slice(buf.content());
@@ -102,7 +104,7 @@ mod tests {
     }
 
     impl<'a> PageSource<'a> for MmapMut {
-        fn as_buf(&'a self, offset: crate::Off, len: crate::Off) -> SourceResult<RefBuffer<'a>> {
+        fn as_buf(&'a self, offset: crate::Off, len: crate::Off) -> PosixResult<RefBuffer<'a>> {
             let accessor = TempBlockAccessor::from(offset);
             let maxsize = self.len();
             let rlen = len.min(self.len() as u64 - offset);
@@ -117,7 +119,7 @@ mod tests {
             ))
         }
 
-        fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> SourceResult<RefBufferMut<'a>> {
+        fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> PosixResult<RefBufferMut<'a>> {
             let accessor = TempBlockAccessor::from(offset);
             let maxsize = self.len();
             let rlen = len.min(self.len() as u64 - offset);
@@ -136,9 +138,12 @@ mod tests {
     fn test_uncompressed_mmap_filesystem() {
         for file in load_fixtures() {
             let mut sbi: SimpleBufferedFileSystem = SuperblockInfo::new(
-                Box::new(MemFileSystem::new(UncompressedBackend::new(unsafe {
-                    MmapMut::map_mut(&file).unwrap()
-                }))),
+                Box::new(
+                    MemFileSystem::try_new(UncompressedBackend::new(unsafe {
+                        MmapMut::map_mut(&file).unwrap()
+                    }))
+                    .unwrap(),
+                ),
                 HashMap::new(),
                 (),
             );
