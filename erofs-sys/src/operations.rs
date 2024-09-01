@@ -53,34 +53,6 @@ where
     read_inode(filesystem, collection, nid)
 }
 
-pub(crate) fn dir_walk<'a, I, C>(
-    filesystem: &'a dyn FileSystem<I>,
-    collection: &'a mut C,
-    inode: &I,
-    name: &str,
-) -> PosixResult<&'a mut I>
-where
-    I: Inode,
-    C: InodeCollection<I = I>,
-{
-    let mut nid = inode.nid();
-    for part in name.split('/') {
-        if part.is_empty() {
-            continue;
-        }
-        let inode = read_inode(filesystem, collection, nid)?; // this part collection is reborrowed for shorter
-        match filesystem.find_nid(inode, part)? {
-            Some(n) => {
-                nid = n;
-            }
-            None => {
-                return Err(Errno::ENOENT);
-            }
-        }
-    }
-    read_inode(filesystem, collection, nid)
-}
-
 pub(crate) fn dir_lookup<'a, I, C>(
     filesystem: &'a dyn FileSystem<I>,
     collection: &'a mut C,
