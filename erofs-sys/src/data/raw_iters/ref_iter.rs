@@ -35,7 +35,7 @@ where
                 .as_buf(m.physical.start, m.physical.len.min(EROFS_TEMP_BLOCK_SZ))
             {
                 Ok(buf) => Some(heap_alloc(buf).map(|v| v as Box<dyn Buffer + 'a>)),
-                Err(_) => None,
+                Err(e) => Some(Err(e)),
             },
             None => None,
         }
@@ -87,7 +87,7 @@ where
         let pa = TempBlockAccessor::from(self.offset);
         let len = pa.len.min(self.len);
         let result: Option<Self::Item> = self.backend.as_buf(self.offset, len).map_or_else(
-            |_| None,
+            |e| Some(Err(e)),
             |x| {
                 self.offset += x.content().len() as Off;
                 self.len -= x.content().len() as Off;

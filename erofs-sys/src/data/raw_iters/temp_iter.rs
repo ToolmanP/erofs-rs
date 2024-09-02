@@ -42,7 +42,7 @@ where
                             heap_alloc(TempBuffer::new(block, 0, rlen as usize))
                                 .map(|v| v as Box<dyn Buffer + 'a>),
                         ),
-                        Err(_) => None,
+                        Err(e) => Some(Err(e)),
                     }
                 } else {
                     match self
@@ -50,7 +50,7 @@ where
                         .get_temp_buffer(m.physical.start, m.logical.len)
                     {
                         Ok(buffer) => Some(heap_alloc(buffer).map(|v| v as Box<dyn Buffer + 'a>)),
-                        Err(_) => None,
+                        Err(e) => Some(Err(e)),
                     }
                 }
             }
@@ -103,7 +103,7 @@ where
             .backend
             .get_temp_buffer(self.offset, self.len)
             .map_or_else(
-                |_| None,
+                |e| Some(Err(e)),
                 |buffer| {
                     self.offset += buffer.content().len() as Off;
                     self.len -= buffer.content().len() as Off;
