@@ -3,7 +3,10 @@
 
 /// On-disk Directory Descriptor Format for EROFS
 /// Documented on [EROFS Directory](https://erofs.docs.kernel.org/en/latest/core_ondisk.html#directories)
+use core::mem::size_of;
+
 #[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct DirentDesc {
     pub(crate) nid: u64,
     pub(crate) nameoff: u16,
@@ -12,9 +15,21 @@ pub(crate) struct DirentDesc {
 }
 
 /// In memory representation of a real directory entry.
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Dirent<'a> {
-    pub(crate) desc: &'a DirentDesc,
+    pub(crate) desc: DirentDesc,
     pub(crate) name: &'a [u8],
+}
+
+impl From<[u8; size_of::<DirentDesc>()]> for DirentDesc {
+    fn from(data: [u8; size_of::<DirentDesc>()]) -> Self {
+        Self {
+            nid: u64::from_le_bytes(data[0..8].try_into().unwrap()),
+            nameoff: u16::from_le_bytes(data[8..10].try_into().unwrap()),
+            file_type: data[10],
+            reserved: data[11],
+        }
+    }
 }
 
 /// Create a collection of directory entries from a buffer.
@@ -37,24 +52,24 @@ impl<'a> DirCollection<'a> {
     pub(crate) fn dirent(&self, index: usize) -> Option<Dirent<'a>> {
         //SAFETY: Note that DirentDesc is yet another ffi-safe type and the size of Block is larger
         //than that of DirentDesc. It's safe to allow this unsafe cast.
-        let descs: &'a [DirentDesc] = unsafe {
-            core::slice::from_raw_parts(self.data.as_ptr() as *const DirentDesc, self.total)
-        };
+        let descs: &'a [[u8; size_of::<DirentDesc>()]] =
+            unsafe { core::slice::from_raw_parts(self.data.as_ptr().cast(), self.total) };
         if index >= self.total {
             None
         } else if index == self.total - 1 {
-            let len = self.data.len() - descs[self.total - 1].nameoff as usize;
+            let desc = DirentDesc::from(descs[index]);
+            let len = self.data.len() - desc.nameoff as usize;
             Some(Dirent {
-                desc: &descs[index],
-                name: &self.data
-                    [descs[index].nameoff as usize..(descs[index].nameoff as usize) + len],
+                desc,
+                name: &self.data[desc.nameoff as usize..(desc.nameoff as usize) + len],
             })
         } else {
-            let len = (descs[index + 1].nameoff - descs[index].nameoff) as usize;
+            let desc = DirentDesc::from(descs[index]);
+            let next_desc = DirentDesc::from(descs[index + 1]);
+            let len = (next_desc.nameoff - desc.nameoff) as usize;
             Some(Dirent {
-                desc: &descs[index],
-                name: &self.data
-                    [descs[index].nameoff as usize..(descs[index].nameoff as usize) + len],
+                desc,
+                name: &self.data[desc.nameoff as usize..(desc.nameoff as usize) + len],
             })
         }
     }
