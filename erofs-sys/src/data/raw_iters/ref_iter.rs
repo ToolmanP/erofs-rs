@@ -33,11 +33,16 @@ where
     type Item = PosixResult<Box<dyn Buffer + 'a>>;
     fn next(&mut self) -> Option<Self::Item> {
         match self.map_iter.next() {
-            Some(m) => match self
-                .backend
-                .as_buf(m.physical.start, m.physical.len.min(EROFS_TEMP_BLOCK_SZ))
-            {
-                Ok(buf) => Some(heap_alloc(buf).map(|v| v as Box<dyn Buffer + 'a>)),
+            Some(map) => match map {
+                Ok(m) => {
+                    match self
+                        .backend
+                        .as_buf(m.physical.start, m.physical.len.min(EROFS_TEMP_BLOCK_SZ))
+                    {
+                        Ok(buf) => Some(heap_alloc(buf).map(|v| v as Box<dyn Buffer + 'a>)),
+                        Err(e) => Some(Err(e)),
+                    }
+                }
                 Err(e) => Some(Err(e)),
             },
             None => None,

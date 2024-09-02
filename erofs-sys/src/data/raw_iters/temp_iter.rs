@@ -34,29 +34,34 @@ where
     type Item = PosixResult<Box<dyn Buffer + 'a>>;
     fn next(&mut self) -> Option<Self::Item> {
         match self.map_iter.next() {
-            Some(m) => {
-                if m.logical.len < EROFS_TEMP_BLOCK_SZ as Off {
-                    let mut block = EROFS_TEMP_BLOCK;
-                    match self
-                        .backend
-                        .fill(&mut block[0..m.physical.len as usize], m.physical.start)
-                    {
-                        Ok(rlen) => Some(
-                            heap_alloc(TempBuffer::new(block, 0, rlen as usize))
-                                .map(|v| v as Box<dyn Buffer + 'a>),
-                        ),
-                        Err(e) => Some(Err(e)),
-                    }
-                } else {
-                    match self
-                        .backend
-                        .get_temp_buffer(m.physical.start, m.logical.len)
-                    {
-                        Ok(buffer) => Some(heap_alloc(buffer).map(|v| v as Box<dyn Buffer + 'a>)),
-                        Err(e) => Some(Err(e)),
+            Some(map) => match map {
+                Ok(m) => {
+                    if m.logical.len < EROFS_TEMP_BLOCK_SZ as Off {
+                        let mut block = EROFS_TEMP_BLOCK;
+                        match self
+                            .backend
+                            .fill(&mut block[0..m.physical.len as usize], m.physical.start)
+                        {
+                            Ok(rlen) => Some(
+                                heap_alloc(TempBuffer::new(block, 0, rlen as usize))
+                                    .map(|v| v as Box<dyn Buffer + 'a>),
+                            ),
+                            Err(e) => Some(Err(e)),
+                        }
+                    } else {
+                        match self
+                            .backend
+                            .get_temp_buffer(m.physical.start, m.logical.len)
+                        {
+                            Ok(buffer) => {
+                                Some(heap_alloc(buffer).map(|v| v as Box<dyn Buffer + 'a>))
+                            }
+                            Err(e) => Some(Err(e)),
+                        }
                     }
                 }
-            }
+                Err(e) => Some(Err(e)),
+            },
             None => None,
         }
     }

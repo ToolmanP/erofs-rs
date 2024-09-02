@@ -79,7 +79,7 @@ where
     FS: FileSystem<I>,
     I: Inode,
 {
-    type Item = Map;
+    type Item = MapResult;
     fn next(&mut self) -> Option<Self::Item> {
         if self.offset >= self.len {
             None
@@ -92,9 +92,9 @@ where
                     m.physical.len = len;
                     m.logical.len = len;
                     self.offset += len;
-                    Some(m)
+                    Some(Ok(m))
                 }
-                Err(_) => None,
+                Err(e) => Some(Err(e)),
             }
         }
     }
