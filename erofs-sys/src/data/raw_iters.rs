@@ -68,7 +68,7 @@ impl<'a> Iterator for MetadataBufferIter<'a> {
 /// extended attributes. Since the key-value is flattened out in its original format.
 pub(crate) struct SkippableContinousIter<'a> {
     iter: Box<dyn ContinousBufferIter<'a> + 'a>,
-    data: Box<dyn Buffer + 'a>,
+    data: RefBuffer<'a>,
     cur: Off,
 }
 

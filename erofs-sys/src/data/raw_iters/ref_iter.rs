@@ -30,14 +30,14 @@ where
     B: MemoryBackend<'a>,
     I: Inode,
 {
-    type Item = PosixResult<Box<dyn Buffer + 'a>>;
+    type Item = PosixResult<RefBuffer<'a>>;
     fn next(&mut self) -> Option<Self::Item> {
         match self.map_iter.next() {
             Some(m) => match self
                 .backend
                 .as_buf(m.physical.start, m.physical.len.min(EROFS_TEMP_BLOCK_SZ))
             {
-                Ok(buf) => Some(heap_alloc(buf).map(|v| v as Box<dyn Buffer + 'a>)),
+                Ok(buf) => Some(Ok(buf)),
                 Err(e) => Some(Err(e)),
             },
             None => None,
@@ -81,7 +81,7 @@ impl<'a, B> Iterator for ContinuousRefIter<'a, B>
 where
     B: MemoryBackend<'a>,
 {
-    type Item = PosixResult<Box<dyn Buffer + 'a>>;
+    type Item = PosixResult<RefBuffer<'a>>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.len == 0 {
             return None;
@@ -94,7 +94,7 @@ where
             |x| {
                 self.offset += x.content().len() as Off;
                 self.len -= x.content().len() as Off;
-                Some(heap_alloc(x).map(|v| v as Box<dyn Buffer + 'a>))
+                Some(Ok(x))
             },
         );
         result
