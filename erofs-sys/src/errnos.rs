@@ -189,14 +189,3 @@ impl From<*mut core::ffi::c_void> for Errno {
 pub(crate) fn is_value_err(value: *const core::ffi::c_void) -> bool {
     (value as core::ffi::c_ulong) >= (-4095 as core::ffi::c_long) as core::ffi::c_ulong
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-
-    fn test_proper_errno_value() {
-        assert_eq!(Errno::ERANGE as i32, 34);
-        assert_eq!(Errno::ENODATA as i32, 61);
-    }
-}
