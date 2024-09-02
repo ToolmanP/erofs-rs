@@ -1,3 +1,6 @@
+// Copyright 2024 Yiyang Wu
+// SPDX-License-Identifier: MIT or GPL-2.0-later
+
 #[repr(i32)]
 #[non_exhaustive]
 #[allow(clippy::upper_case_acronyms)]

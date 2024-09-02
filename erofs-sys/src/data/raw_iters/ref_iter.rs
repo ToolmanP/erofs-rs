@@ -1,3 +1,6 @@
+// Copyright 2024 Yiyang Wu
+// SPDX-License-Identifier: MIT or GPL-2.0-later
+
 use super::super::*;
 use super::*;
 pub(crate) struct RefMapIter<'a, 'b, FS, B, I>
