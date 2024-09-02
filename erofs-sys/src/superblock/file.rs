@@ -53,6 +53,9 @@ where
     fn device_info(&self) -> &DeviceInfo {
         &self.device_info
     }
+    fn as_filesystem(&self) -> &dyn FileSystem<I> {
+        self
+    }
 }
 
 impl<T> ImageFileSystem<T>

@@ -326,29 +326,50 @@ impl TryFrom<CompactInodeInfoBuf> for CompactInodeInfo {
     }
 }
 
-impl TryFrom<ExtendedInodeInfoBuf> for InodeInfo {
+impl<I> TryFrom<(&dyn FileSystem<I>, Nid)> for InodeInfo
+where
+    I: Inode,
+{
     type Error = Errno;
-    fn try_from(value: ExtendedInodeInfoBuf) -> Result<Self, Self::Error> {
-        let compact_buf: CompactInodeInfoBuf = value[0..32].try_into().unwrap();
+    fn try_from(value: (&dyn FileSystem<I>, Nid)) -> Result<Self, Self::Error> {
+        let f = value.0;
+        let nid = value.1;
+        let offset = f.iloc(nid);
+        let mut buf: ExtendedInodeInfoBuf = DEFAULT_INODE_BUF;
+        f.backend().fill(&mut buf[0..32], offset)?;
+        let compact_buf: CompactInodeInfoBuf = buf[0..32].try_into().unwrap();
         let r: Result<CompactInodeInfo, InodeError> = CompactInodeInfo::try_from(compact_buf);
+
         match r {
             Ok(compact) => Ok(InodeInfo::Compact(compact)),
             Err(e) => match e {
-                InodeError::VersionError => Ok(InodeInfo::Extended(ExtendedInodeInfo {
-                    i_format: Format(u16::from_le_bytes(value[0..2].try_into().unwrap())),
-                    i_xattr_icount: u16::from_le_bytes(value[2..4].try_into().unwrap()),
-                    i_mode: u16::from_le_bytes(value[4..6].try_into().unwrap()),
-                    i_reserved: value[6..8].try_into().unwrap(),
-                    i_size: u64::from_le_bytes(value[8..16].try_into().unwrap()),
-                    i_u: value[16..20].try_into().unwrap(),
-                    i_ino: u32::from_le_bytes(value[20..24].try_into().unwrap()),
-                    i_uid: u32::from_le_bytes(value[24..28].try_into().unwrap()),
-                    i_gid: u32::from_le_bytes(value[28..32].try_into().unwrap()),
-                    i_mtime: u64::from_le_bytes(value[32..40].try_into().unwrap()),
-                    i_mtime_nsec: u32::from_le_bytes(value[40..44].try_into().unwrap()),
-                    i_nlink: u32::from_le_bytes(value[44..48].try_into().unwrap()),
-                    i_reserved2: value[48..64].try_into().unwrap(),
-                })),
+                InodeError::VersionError => {
+                    let gotten = (f.blksz() - f.blkoff(offset + 32)).min(64);
+                    f.backend()
+                        .fill(&mut buf[32..(32 + gotten).min(64) as usize], offset + 32)?;
+
+                    if gotten < 32 {
+                        f.backend().fill(
+                            &mut buf[(32 + gotten) as usize..64],
+                            f.blkpos(f.blknr(offset) + 1),
+                        )?;
+                    }
+                    Ok(InodeInfo::Extended(ExtendedInodeInfo {
+                        i_format: Format(u16::from_le_bytes(buf[0..2].try_into().unwrap())),
+                        i_xattr_icount: u16::from_le_bytes(buf[2..4].try_into().unwrap()),
+                        i_mode: u16::from_le_bytes(buf[4..6].try_into().unwrap()),
+                        i_reserved: buf[6..8].try_into().unwrap(),
+                        i_size: u64::from_le_bytes(buf[8..16].try_into().unwrap()),
+                        i_u: buf[16..20].try_into().unwrap(),
+                        i_ino: u32::from_le_bytes(buf[20..24].try_into().unwrap()),
+                        i_uid: u32::from_le_bytes(buf[24..28].try_into().unwrap()),
+                        i_gid: u32::from_le_bytes(buf[28..32].try_into().unwrap()),
+                        i_mtime: u64::from_le_bytes(buf[32..40].try_into().unwrap()),
+                        i_mtime_nsec: u32::from_le_bytes(buf[40..44].try_into().unwrap()),
+                        i_nlink: u32::from_le_bytes(buf[44..48].try_into().unwrap()),
+                        i_reserved2: buf[48..64].try_into().unwrap(),
+                    }))
+                }
                 InodeError::PosixError(e) => Err(e),
             },
         }

@@ -31,6 +31,10 @@ where
         &self.backend
     }
 
+    fn as_filesystem(&self) -> &dyn FileSystem<I> {
+        self
+    }
+
     fn mapped_iter<'b, 'a: 'b>(
         &'a self,
         inode: &'b I,

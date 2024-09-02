@@ -116,6 +116,7 @@ where
 {
     fn superblock(&self) -> &SuperBlock;
     fn backend(&self) -> &dyn Backend;
+    fn as_filesystem(&self) -> &dyn FileSystem<I>;
     fn blknr(&self, pos: Off) -> Blk {
         (pos >> self.superblock().blkszbits) as Blk
     }
@@ -287,10 +288,7 @@ where
 
     // Inode related goes here.
     fn read_inode_info(&self, nid: Nid) -> PosixResult<InodeInfo> {
-        let offset = self.iloc(nid);
-        let mut buf: ExtendedInodeInfoBuf = DEFAULT_INODE_BUF;
-        self.backend().fill(&mut buf, offset)?;
-        InodeInfo::try_from(buf)
+        (self.as_filesystem(), nid).try_into()
     }
 
     fn find_nid(&self, inode: &I, name: &str) -> PosixResult<Option<Nid>> {
