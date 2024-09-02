@@ -53,8 +53,12 @@ pub(crate) fn get_device_infos<'a>(
             )?;
         }
     }
-    Ok(DeviceInfo {
-        mask: specs.len().next_power_of_two() as u16,
-        specs,
-    })
+
+    let mask = if specs.is_empty() {
+        0
+    } else {
+        (1 << (specs.len().ilog2() + 1)) - 1
+    };
+
+    Ok(DeviceInfo { mask, specs })
 }
