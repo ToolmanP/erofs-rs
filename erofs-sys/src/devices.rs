@@ -24,6 +24,17 @@ pub(crate) struct DeviceSlot {
     reserved: [u8; 56],
 }
 
+impl From<[u8; 128]> for DeviceSlot {
+    fn from(data: [u8; 128]) -> Self {
+        Self {
+            tags: data[0..64].try_into().unwrap(),
+            blocks: u32::from_le_bytes(data[64..68].try_into().unwrap()),
+            mapped_blocks: u32::from_le_bytes(data[68..72].try_into().unwrap()),
+            reserved: data[72..128].try_into().unwrap(),
+        }
+    }
+}
+
 /// Device information.
 pub(crate) struct DeviceInfo {
     pub(crate) mask: u16,
