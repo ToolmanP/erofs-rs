@@ -106,7 +106,7 @@ where
     }
 }
 
-impl<'a, B> ContinousBufferIter<'a> for ContinuousRefIter<'a, B>
+impl<'a, B> ContinuousBufferIter<'a> for ContinuousRefIter<'a, B>
 where
     B: MemoryBackend<'a>,
 {

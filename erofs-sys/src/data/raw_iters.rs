@@ -67,8 +67,8 @@ impl<'a> Iterator for MetadataBufferIter<'a> {
 
 /// Represents a skippable continuous buffer iterator. This is used primarily for reading the
 /// extended attributes. Since the key-value is flattened out in its original format.
-pub(crate) struct SkippableContinousIter<'a> {
-    iter: Box<dyn ContinousBufferIter<'a> + 'a>,
+pub(crate) struct SkippableContinuousIter<'a> {
+    iter: Box<dyn ContinuousBufferIter<'a> + 'a>,
     data: Box<dyn Buffer + 'a>,
     cur: Off,
 }
@@ -99,9 +99,9 @@ impl From<Errno> for SkipCmpError {
     }
 }
 
-impl<'a> SkippableContinousIter<'a> {
+impl<'a> SkippableContinuousIter<'a> {
     pub(crate) fn try_new(
-        mut iter: Box<dyn ContinousBufferIter<'a> + 'a>,
+        mut iter: Box<dyn ContinuousBufferIter<'a> + 'a>,
     ) -> PosixResult<Option<Self>> {
         if iter.eof() {
             return Ok(None);

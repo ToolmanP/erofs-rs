@@ -42,7 +42,7 @@ pub(crate) struct DeviceInfo {
 }
 
 pub(crate) fn get_device_infos<'a>(
-    iter: &mut (dyn ContinousBufferIter<'a> + 'a),
+    iter: &mut (dyn ContinuousBufferIter<'a> + 'a),
 ) -> PosixResult<DeviceInfo> {
     let mut specs = Vec::new();
     for data in iter {

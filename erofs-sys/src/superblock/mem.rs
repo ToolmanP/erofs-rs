@@ -50,9 +50,9 @@ where
         &'a self,
         offset: Off,
         len: Off,
-    ) -> PosixResult<Box<dyn ContinousBufferIter<'a> + 'a>> {
+    ) -> PosixResult<Box<dyn ContinuousBufferIter<'a> + 'a>> {
         heap_alloc(ContinuousRefIter::new(&self.backend, offset, len))
-            .map(|v| v as Box<dyn ContinousBufferIter<'a> + 'a>)
+            .map(|v| v as Box<dyn ContinuousBufferIter<'a> + 'a>)
     }
     fn xattr_infixes(&self) -> &Vec<XAttrInfix> {
         &self.infixes

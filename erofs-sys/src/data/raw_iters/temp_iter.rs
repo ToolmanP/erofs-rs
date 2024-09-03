@@ -122,7 +122,7 @@ where
     }
 }
 
-impl<'a, B> ContinousBufferIter<'a> for ContinuousTempBufferIter<'a, B>
+impl<'a, B> ContinuousBufferIter<'a> for ContinuousTempBufferIter<'a, B>
 where
     B: FileBackend,
 {

@@ -284,7 +284,7 @@ where
         &'a self,
         offset: Off,
         len: Off,
-    ) -> PosixResult<Box<dyn ContinousBufferIter<'a> + 'a>>;
+    ) -> PosixResult<Box<dyn ContinuousBufferIter<'a> + 'a>>;
 
     // Inode related goes here.
     fn read_inode_info(&self, nid: Nid) -> PosixResult<InodeInfo> {
@@ -389,7 +389,7 @@ where
             - shared_count as Off * 4;
 
         if let Some(mut inline_provider) =
-            SkippableContinousIter::try_new(self.continous_iter(inline_offset, inline_len)?)?
+            SkippableContinuousIter::try_new(self.continous_iter(inline_offset, inline_len)?)?
         {
             while !inline_provider.eof() {
                 let header = inline_provider.get_entry_header()?;
@@ -411,7 +411,7 @@ where
         }
 
         for entry_index in inode.xattrs_shared_entries().shared_indexes.iter() {
-            let mut shared_provider = SkippableContinousIter::try_new(self.continous_iter(
+            let mut shared_provider = SkippableContinuousIter::try_new(self.continous_iter(
                 self.blkpos(self.superblock().xattr_blkaddr) + (*entry_index as Off) * 4,
                 u64::MAX,
             )?)?
@@ -448,7 +448,7 @@ where
             - shared_count as Off * 4;
 
         if let Some(mut inline_provider) =
-            SkippableContinousIter::try_new(self.continous_iter(inline_offset, inline_len)?)?
+            SkippableContinuousIter::try_new(self.continous_iter(inline_offset, inline_len)?)?
         {
             while !inline_provider.eof() {
                 let header = inline_provider.get_entry_header()?;
@@ -462,7 +462,7 @@ where
         }
 
         for index in inode.xattrs_shared_entries().shared_indexes.iter() {
-            let mut shared_provider = SkippableContinousIter::try_new(self.continous_iter(
+            let mut shared_provider = SkippableContinuousIter::try_new(self.continous_iter(
                 self.blkpos(self.superblock().xattr_blkaddr) + (*index as Off) * 4,
                 u64::MAX,
             )?)?

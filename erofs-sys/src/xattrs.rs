@@ -149,7 +149,7 @@ pub(crate) trait XAttrEntriesProvider {
     ) -> PosixResult<XAttrValue>;
     fn skip_xattr_value(&mut self, header: &XAttrEntryHeader) -> PosixResult<()>;
 }
-impl<'a> XAttrEntriesProvider for SkippableContinousIter<'a> {
+impl<'a> XAttrEntriesProvider for SkippableContinuousIter<'a> {
     fn get_entry_header(&mut self) -> PosixResult<XAttrEntryHeader> {
         let mut buf: [u8; 4] = [0; 4];
         self.read(&mut buf).map(|_| XAttrEntryHeader::from(buf))

@@ -12,7 +12,7 @@ pub(crate) trait BufferMapIter<'a>:
 
 /// Represents a basic iterator over a range of bytes from data backends.
 /// Note that this is skippable and can be used to move the iterator's cursor forward.
-pub(crate) trait ContinousBufferIter<'a>:
+pub(crate) trait ContinuousBufferIter<'a>:
     Iterator<Item = PosixResult<Box<dyn Buffer + 'a>>>
 {
     fn advance_off(&mut self, offset: Off);
