@@ -8,12 +8,14 @@ use alloc::vec::Vec;
 
 use super::alloc_helper::*;
 use super::data::raw_iters::*;
+use super::errnos::*;
 use super::inode::*;
 use super::superblock::*;
 use super::xattrs::*;
 use super::*;
 
 use crate::round;
+
 pub(crate) fn read_inode<'a, I, C>(
     filesystem: &'a dyn FileSystem<I>,
     collection: &'a mut C,
@@ -47,7 +49,7 @@ where
                 nid = n;
             }
             None => {
-                return Err(Errno::ENOENT);
+                return Err(ENOENT);
             }
         }
     }
@@ -66,9 +68,7 @@ where
 {
     filesystem
         .find_nid(inode, name)?
-        .map_or(Err(Errno::ENOENT), |nid| {
-            read_inode(filesystem, collection, nid)
-        })
+        .map_or(Err(ENOENT), |nid| read_inode(filesystem, collection, nid))
 }
 
 pub(crate) fn get_xattr_infixes<'a>(

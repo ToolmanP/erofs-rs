@@ -109,7 +109,7 @@ mod tests {
     impl Source for File {
         fn fill(&self, data: &mut [u8], offset: Off) -> PosixResult<u64> {
             self.read_at(data, offset)
-                .map_or(Err(Errno::ERANGE), |size| Ok(size as u64))
+                .map_or(Err(ERANGE), |size| Ok(size as u64))
         }
     }
 

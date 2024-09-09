@@ -3,6 +3,7 @@
 
 use super::alloc_helper::*;
 use super::data::raw_iters::*;
+use super::errnos::*;
 use super::*;
 use crate::round;
 
@@ -205,7 +206,7 @@ impl<'a> XAttrEntriesProvider for SkippableContinuousIter<'a> {
             let if_index: usize = header.name_index.into();
 
             if if_index >= ifs.len() {
-                return Err(Errno::ENODATA);
+                return Err(ENODATA);
             }
 
             let infix = ifs.get(if_index).unwrap();
@@ -214,24 +215,24 @@ impl<'a> XAttrEntriesProvider for SkippableContinuousIter<'a> {
             let pf_index = infix.prefix_index();
 
             if pf_index >= EROFS_XATTRS_PREFIXS.len() as u8 {
-                return Err(Errno::ENODATA);
+                return Err(ENODATA);
             }
 
             if index != pf_index as u32
                 || name.len() != ilen + header.suffix_len as usize
                 || name[..ilen] != *infix.name()
             {
-                return Err(Errno::ENODATA);
+                return Err(ENODATA);
             }
             ilen
         } else {
             let pf_index: usize = header.name_index.into();
             if pf_index >= EROFS_XATTRS_PREFIXS.len() {
-                return Err(Errno::ENODATA);
+                return Err(ENODATA);
             }
 
             if pf_index != index as usize || header.suffix_len as usize != name.len() {
-                return Err(Errno::ENODATA);
+                return Err(ENODATA);
             }
             0
         };
@@ -240,7 +241,7 @@ impl<'a> XAttrEntriesProvider for SkippableContinuousIter<'a> {
             Ok(()) => match buffer.as_mut() {
                 Some(b) => {
                     if b.len() < header.value_len as usize {
-                        return Err(Errno::ERANGE);
+                        return Err(ERANGE);
                     }
                     self.read(&mut b[..header.value_len as usize])?;
                     Ok(XAttrValue::Buffer(header.value_len as usize))
@@ -254,7 +255,7 @@ impl<'a> XAttrEntriesProvider for SkippableContinuousIter<'a> {
             Err(skip_err) => match skip_err {
                 SkipCmpError::NotEqual(nvalue) => {
                     self.skip(xattr_size - nvalue)?;
-                    Err(Errno::ENODATA)
+                    Err(ENODATA)
                 }
                 SkipCmpError::PosixError(e) => Err(e),
             },

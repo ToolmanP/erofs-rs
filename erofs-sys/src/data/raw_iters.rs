@@ -71,8 +71,7 @@ impl<'a> SkippableContinuousIter<'a> {
             buf.clone_from_slice(&self.data.content()[self.cur..(self.cur + blen)]);
             self.cur += blen;
         } else {
-            buf[bcur..(bcur + dlen)]
-                .copy_from_slice(&self.data.content()[self.cur..]);
+            buf[bcur..(bcur + dlen)].copy_from_slice(&self.data.content()[self.cur..]);
             bcur += dlen;
             while bcur < blen {
                 self.cur = 0;

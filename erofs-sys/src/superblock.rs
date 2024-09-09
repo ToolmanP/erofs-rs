@@ -9,6 +9,7 @@ use super::alloc_helper::*;
 use super::data::raw_iters::*;
 use super::devices::*;
 use super::dir::*;
+use super::errnos::*;
 use super::inode::*;
 use super::map::*;
 use super::xattrs::*;
@@ -157,7 +158,7 @@ where
         let nblocks = sb.blk_round_up(inode.info().file_size());
         let blkaddr = match inode.info().spec() {
             Spec::Data(DataSpec::RawBlk(blkaddr)) => Ok(blkaddr),
-            _ => Err(Errno::EUCLEAN),
+            _ => Err(EUCLEAN),
         }?;
 
         let lastblk = if inline { nblocks - 1 } else { nblocks };
@@ -190,7 +191,7 @@ where
                 map_type: MapType::Meta,
             })
         } else {
-            Err(Errno::EUCLEAN)
+            Err(EUCLEAN)
         }
     }
 
@@ -198,7 +199,7 @@ where
         let sb = self.superblock();
         let chunkformat = match inode.info().spec() {
             Spec::Data(DataSpec::Chunk(chunkformat)) => Ok(chunkformat),
-            _ => Err(Errno::EUCLEAN),
+            _ => Err(EUCLEAN),
         }?;
         let accessor = sb.chunk_access(chunkformat, offset);
 
@@ -216,7 +217,7 @@ where
             self.backend().fill(&mut buf, pos)?;
             let chunk_index = ChunkIndex::from(buf);
             if chunk_index.blkaddr == u32::MAX {
-                Err(Errno::EUCLEAN)
+                Err(EUCLEAN)
             } else {
                 Ok(Map {
                     logical: Segment {
@@ -247,7 +248,7 @@ where
             let blkaddr = u32::from_le_bytes(buf);
             let len = accessor.len.min(inode.info().file_size() - offset);
             if blkaddr == u32::MAX {
-                Err(Errno::EUCLEAN)
+                Err(EUCLEAN)
             } else {
                 Ok(Map {
                     logical: Segment {
@@ -319,7 +320,7 @@ where
         let sb = self.superblock();
         let accessor = sb.blk_access(offset);
         if offset > inode.info().file_size() {
-            return PosixResult::Err(Errno::EUCLEAN);
+            return PosixResult::Err(EUCLEAN);
         }
 
         let map_offset = round!(DOWN, offset, sb.blksz());
@@ -445,7 +446,7 @@ where
             }
         }
 
-        PosixResult::Err(Errno::ENODATA)
+        PosixResult::Err(ENODATA)
     }
 
     fn list_xattrs(&self, inode: &I, buffer: &mut [u8]) -> PosixResult<usize> {

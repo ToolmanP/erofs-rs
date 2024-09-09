@@ -22,7 +22,7 @@ pub(crate) fn push_vec<T>(v: &mut Vec<T>, value: T) -> PosixResult<()> {
         #[cfg(CONFIG_EROFS_FS = "y")]
         () => v
             .push(value, GFP_KERNEL)
-            .map_or_else(|_| Err(Errno::ENOMEM), |_| Ok(())),
+            .map_or_else(|_| Err(ENOMEM), |_| Ok(())),
         #[cfg(not(CONFIG_EROFS_FS = "y"))]
         () => {
             v.push(value);
@@ -36,7 +36,7 @@ pub(crate) fn extend_from_slice<T: Clone>(v: &mut Vec<T>, slice: &[T]) -> PosixR
         #[cfg(CONFIG_EROFS_FS = "y")]
         () => v
             .extend_from_slice(slice, GFP_KERNEL)
-            .map_or_else(|_| Err(Errno::ENOMEM), |_| Ok(())),
+            .map_or_else(|_| Err(ENOMEM), |_| Ok(())),
         #[cfg(not(CONFIG_EROFS_FS = "y"))]
         () => {
             v.extend_from_slice(slice);
@@ -48,7 +48,7 @@ pub(crate) fn extend_from_slice<T: Clone>(v: &mut Vec<T>, slice: &[T]) -> PosixR
 pub(crate) fn heap_alloc<T>(value: T) -> PosixResult<Box<T>> {
     match () {
         #[cfg(CONFIG_EROFS_FS = "y")]
-        () => Box::new(value, GFP_KERNEL).map_or_else(|_| Err(Errno::ENOMEM), |v| Ok(v)),
+        () => Box::new(value, GFP_KERNEL).map_or_else(|_| Err(ENOMEM), |v| Ok(v)),
         #[cfg(not(CONFIG_EROFS_FS = "y"))]
         () => Ok(Box::new(value)),
     }
@@ -57,9 +57,7 @@ pub(crate) fn heap_alloc<T>(value: T) -> PosixResult<Box<T>> {
 pub(crate) fn vec_with_capacity<T: Default + Clone>(capacity: usize) -> PosixResult<Vec<T>> {
     match () {
         #[cfg(CONFIG_EROFS_FS = "y")]
-        () => {
-            Vec::with_capacity(capacity, GFP_KERNEL).map_or_else(|_| Err(Errno::ENOMEM), |v| Ok(v))
-        }
+        () => Vec::with_capacity(capacity, GFP_KERNEL).map_or_else(|_| Err(ENOMEM), |v| Ok(v)),
         #[cfg(not(CONFIG_EROFS_FS = "y"))]
         () => Ok(vec![Default::default(); capacity]),
     }
