@@ -91,7 +91,7 @@ impl From<[u8; 128]> for SuperBlock {
 pub(crate) type SuperBlockBuf = [u8; size_of::<SuperBlock>()];
 pub(crate) const SUPERBLOCK_EMPTY_BUF: SuperBlockBuf = [0; size_of::<SuperBlock>()];
 
-/// Used for external ondisk block buffer address calculation.
+/// Used for external address calculation.
 pub(crate) struct Accessor {
     pub(crate) base: Off,
     pub(crate) off: Off,
