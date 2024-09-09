@@ -47,13 +47,12 @@ pub(crate) fn get_device_infos<'a>(
     let mut specs = Vec::new();
     for data in iter {
         let buffer = data?;
-        let slots = unsafe {
-            core::slice::from_raw_parts(
-                buffer.content().as_ptr() as *const DeviceSlot,
-                buffer.content().len() >> 7,
-            )
-        };
-        for slot in slots {
+        let mut cur: usize = 0;
+        let len = buffer.content().len();
+        while cur + 128 <= len {
+            let slot_data: [u8; 128] = buffer.content()[cur..cur + 128].try_into().unwrap();
+            let slot = DeviceSlot::from(slot_data);
+            cur += 128;
             push_vec(
                 &mut specs,
                 DeviceSpec {
