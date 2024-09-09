@@ -8,80 +8,22 @@ pub(crate) use traits::*;
 
 pub(crate) use super::*;
 
-/// This is used as a iterator to read the metadata buffer. The metadata buffer is a continous 4
-/// bytes aligned collection of integers. This is used primarily when reading an inode's xattrs
-/// indexe.
-pub(crate) struct MetadataBufferIter<'a> {
-    backend: &'a dyn Backend,
-    buffer: TempBuffer,
-    offset: Off,
-    total: usize,
-}
-
-impl<'a> MetadataBufferIter<'a> {
-    pub(crate) fn new(backend: &'a dyn Backend, offset: Off, total: usize) -> Self {
-        Self {
-            backend,
-            buffer: TempBuffer::empty(),
-            offset,
-            total,
-        }
-    }
-}
-
-impl<'a> Iterator for MetadataBufferIter<'a> {
-    type Item = PosixResult<Vec<u8>>;
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.total == 0 {
-            return None;
-        }
-
-        if self.buffer.start == self.buffer.maxsize {
-            match self
-                .backend
-                .get_temp_buffer(self.offset, EROFS_TEMP_BLOCK_SZ)
-            {
-                Ok(buffer) => {
-                    self.buffer = buffer;
-                }
-                Err(e) => {
-                    return Some(Err(e));
-                }
-            }
-            self.offset += self.buffer.maxsize as Off;
-        }
-
-        let data = self.buffer.content();
-        let size = u16::from_le_bytes([data[0], data[1]]) as usize;
-        let mut result: Vec<u8> = Vec::new();
-        match extend_from_slice(&mut result, &data[2..size + 2]) {
-            Ok(()) => {
-                self.buffer.start = round!(UP, self.buffer.start + size + 2, 4);
-                self.total -= 1;
-                Some(Ok(result))
-            }
-            Err(e) => Some(Err(e)),
-        }
-    }
-}
-
 /// Represents a skippable continuous buffer iterator. This is used primarily for reading the
 /// extended attributes. Since the key-value is flattened out in its original format.
 pub(crate) struct SkippableContinuousIter<'a> {
     iter: Box<dyn ContinuousBufferIter<'a> + 'a>,
     data: Box<dyn Buffer + 'a>,
-    cur: Off,
+    cur: usize,
 }
 
 fn cmp_with_cursor_move(
     lhs: &[u8],
     rhs: &[u8],
-    lhs_cur: &mut Off,
-    rhs_cur: &mut Off,
-    len: Off,
+    lhs_cur: &mut usize,
+    rhs_cur: &mut usize,
+    len: usize,
 ) -> bool {
-    let result = lhs[*lhs_cur as usize..(*lhs_cur + len) as usize]
-        == rhs[*rhs_cur as usize..(*rhs_cur + len) as usize];
+    let result = lhs[*lhs_cur..(*lhs_cur + len)] == rhs[*rhs_cur..(*rhs_cur + len)];
     *lhs_cur += len;
     *rhs_cur += len;
     result
@@ -110,42 +52,38 @@ impl<'a> SkippableContinuousIter<'a> {
         Ok(Some(Self { iter, data, cur: 0 }))
     }
     pub(crate) fn skip(&mut self, offset: Off) -> PosixResult<()> {
-        let dlen = self.data.content().len() as Off - self.cur;
-        if offset <= dlen {
-            self.cur += offset;
+        let dlen = self.data.content().len() - self.cur;
+        if offset as usize <= dlen {
+            self.cur += offset as usize;
         } else {
             self.cur = 0;
-            self.iter.advance_off(dlen);
+            self.iter.advance_off(dlen as Off);
             self.data = self.iter.next().unwrap()?;
         }
         Ok(())
     }
 
     pub(crate) fn read(&mut self, buf: &mut [u8]) -> PosixResult<()> {
-        let mut dlen = self.data.content().len() as Off - self.cur;
-        let mut bcur = 0 as Off;
-        let blen = buf.len() as Off;
-
+        let mut dlen = self.data.content().len() - self.cur;
+        let mut bcur = 0_usize;
+        let blen = buf.len();
         if dlen != 0 && dlen >= blen {
-            buf.clone_from_slice(
-                &self.data.content()[self.cur as usize..(self.cur + blen) as usize],
-            );
+            buf.clone_from_slice(&self.data.content()[self.cur..(self.cur + blen)]);
             self.cur += blen;
         } else {
-            buf[bcur as usize..(bcur + dlen) as usize]
-                .copy_from_slice(&self.data.content()[self.cur as usize..]);
+            buf[bcur..(bcur + dlen)]
+                .copy_from_slice(&self.data.content()[self.cur..]);
             bcur += dlen;
             while bcur < blen {
                 self.cur = 0;
                 self.data = self.iter.next().unwrap()?;
-                dlen = self.data.content().len() as Off;
+                dlen = self.data.content().len();
                 if dlen >= blen - bcur {
-                    buf[bcur as usize..]
-                        .copy_from_slice(&self.data.content()[..(blen - bcur) as usize]);
+                    buf[bcur..].copy_from_slice(&self.data.content()[..(blen - bcur)]);
                     self.cur = blen - bcur;
                     return Ok(());
                 } else {
-                    buf[bcur as usize..(bcur + dlen) as usize].copy_from_slice(self.data.content());
+                    buf[bcur..(bcur + dlen)].copy_from_slice(self.data.content());
                     bcur += dlen;
                 }
             }
@@ -154,30 +92,30 @@ impl<'a> SkippableContinuousIter<'a> {
     }
 
     pub(crate) fn try_cmp(&mut self, buf: &[u8]) -> Result<(), SkipCmpError> {
-        let dlen = self.data.content().len() as Off - self.cur;
-        let blen = buf.len() as Off;
-        let mut bcur = 0 as Off;
+        let dlen = self.data.content().len() - self.cur;
+        let blen = buf.len();
+        let mut bcur = 0_usize;
 
         if dlen != 0 && dlen >= blen {
             if cmp_with_cursor_move(self.data.content(), buf, &mut self.cur, &mut bcur, blen) {
                 Ok(())
             } else {
-                Err(SkipCmpError::NotEqual(bcur))
+                Err(SkipCmpError::NotEqual(bcur as Off))
             }
         } else {
             if dlen != 0 {
                 let clen = dlen.min(blen);
                 if !cmp_with_cursor_move(self.data.content(), buf, &mut self.cur, &mut bcur, clen) {
-                    return Err(SkipCmpError::NotEqual(bcur));
+                    return Err(SkipCmpError::NotEqual(bcur as Off));
                 }
             }
             while bcur < blen {
                 self.cur = 0;
                 self.data = self.iter.next().unwrap()?;
-                let dlen = self.data.content().len() as Off;
+                let dlen = self.data.content().len();
                 let clen = dlen.min(blen - bcur);
                 if !cmp_with_cursor_move(self.data.content(), buf, &mut self.cur, &mut bcur, clen) {
-                    return Err(SkipCmpError::NotEqual(bcur));
+                    return Err(SkipCmpError::NotEqual(bcur as Off));
                 }
             }
 
@@ -185,6 +123,6 @@ impl<'a> SkippableContinuousIter<'a> {
         }
     }
     pub(crate) fn eof(&self) -> bool {
-        self.data.content().len() as Off - self.cur == 0 && self.iter.eof()
+        self.data.content().len() - self.cur == 0 && self.iter.eof()
     }
 }
