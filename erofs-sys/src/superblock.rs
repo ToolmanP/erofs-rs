@@ -320,7 +320,7 @@ where
         let sb = self.superblock();
         let accessor = sb.blk_access(offset);
         if offset > inode.info().file_size() {
-            return PosixResult::Err(EUCLEAN);
+            return Err(EUCLEAN);
         }
 
         let map_offset = round!(DOWN, offset, sb.blksz());
@@ -415,7 +415,7 @@ where
                 ) {
                     Ok(value) => return Ok(value),
                     Err(e) => {
-                        if e != Errno::ENODATA {
+                        if e != ENODATA {
                             return Err(e);
                         }
                     }
@@ -439,14 +439,14 @@ where
             ) {
                 Ok(value) => return Ok(value),
                 Err(e) => {
-                    if e != Errno::ENODATA {
+                    if e != ENODATA {
                         return Err(e);
                     }
                 }
             }
         }
 
-        PosixResult::Err(ENODATA)
+        Err(ENODATA)
     }
 
     fn list_xattrs(&self, inode: &I, buffer: &mut [u8]) -> PosixResult<usize> {
