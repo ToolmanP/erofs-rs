@@ -333,25 +333,26 @@ where
     type Error = Errno;
     fn try_from(value: (&dyn FileSystem<I>, Nid)) -> Result<Self, Self::Error> {
         let f = value.0;
+        let sb = f.superblock();
         let nid = value.1;
-        let offset = f.iloc(nid);
+        let offset = sb.iloc(nid);
+        let accessor = sb.blk_access(offset);
         let mut buf: ExtendedInodeInfoBuf = DEFAULT_INODE_BUF;
         f.backend().fill(&mut buf[0..32], offset)?;
         let compact_buf: CompactInodeInfoBuf = buf[0..32].try_into().unwrap();
         let r: Result<CompactInodeInfo, InodeError> = CompactInodeInfo::try_from(compact_buf);
-
         match r {
             Ok(compact) => Ok(InodeInfo::Compact(compact)),
             Err(e) => match e {
                 InodeError::VersionError => {
-                    let gotten = (f.blksz() - f.blkoff(offset + 32)).min(64);
+                    let gotten = (sb.blksz() - accessor.off + 32).min(64);
                     f.backend()
                         .fill(&mut buf[32..(32 + gotten).min(64) as usize], offset + 32)?;
 
                     if gotten < 32 {
                         f.backend().fill(
                             &mut buf[(32 + gotten) as usize..64],
-                            f.blkpos(f.blknr(offset) + 1),
+                            sb.blkpos(sb.blknr(offset) + 1),
                         )?;
                     }
                     Ok(InodeInfo::Extended(ExtendedInodeInfo {

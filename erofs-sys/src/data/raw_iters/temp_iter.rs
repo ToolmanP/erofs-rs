@@ -10,6 +10,7 @@ where
     B: FileBackend,
     I: Inode,
 {
+    sb: &'a SuperBlock,
     backend: &'a B,
     map_iter: MapIter<'a, 'b, FS, I>,
 }
@@ -20,8 +21,23 @@ where
     B: FileBackend,
     I: Inode,
 {
-    pub(crate) fn new(backend: &'a B, map_iter: MapIter<'a, 'b, FS, I>) -> Self {
-        Self { backend, map_iter }
+    pub(crate) fn new(
+        sb: &'a SuperBlock,
+        backend: &'a B,
+        map_iter: MapIter<'a, 'b, FS, I>,
+    ) -> Self {
+        Self {
+            sb,
+            backend,
+            map_iter,
+        }
+    }
+    fn try_yield(&mut self, map: Map) -> PosixResult<Box<dyn Buffer + 'a>> {
+        let accessor = self.sb.blk_access(map.physical.start);
+        let len = accessor.len.min(map.physical.len);
+        let mut block = vec_with_capacity(len as usize).unwrap();
+        self.backend.fill(&mut block, map.physical.start)?;
+        heap_alloc(TempBuffer::new(block, 0, len as usize)).map(|v| v as Box<dyn Buffer + 'a>)
     }
 }
 
@@ -35,31 +51,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         match self.map_iter.next() {
             Some(map) => match map {
-                Ok(m) => {
-                    if m.logical.len < EROFS_TEMP_BLOCK_SZ as Off {
-                        let mut block = EROFS_TEMP_BLOCK;
-                        match self
-                            .backend
-                            .fill(&mut block[0..m.physical.len as usize], m.physical.start)
-                        {
-                            Ok(rlen) => Some(
-                                heap_alloc(TempBuffer::new(block, 0, rlen as usize))
-                                    .map(|v| v as Box<dyn Buffer + 'a>),
-                            ),
-                            Err(e) => Some(Err(e)),
-                        }
-                    } else {
-                        match self
-                            .backend
-                            .get_temp_buffer(m.physical.start, m.logical.len)
-                        {
-                            Ok(buffer) => {
-                                Some(heap_alloc(buffer).map(|v| v as Box<dyn Buffer + 'a>))
-                            }
-                            Err(e) => Some(Err(e)),
-                        }
-                    }
-                }
+                Ok(m) => Some(self.try_yield(m)),
                 Err(e) => Some(Err(e)),
             },
             None => None,
@@ -79,6 +71,7 @@ pub(crate) struct ContinuousTempBufferIter<'a, B>
 where
     B: FileBackend,
 {
+    sb: &'a SuperBlock,
     backend: &'a B,
     offset: Off,
     len: Off,
@@ -88,12 +81,22 @@ impl<'a, B> ContinuousTempBufferIter<'a, B>
 where
     B: FileBackend,
 {
-    pub(crate) fn new(backend: &'a B, offset: Off, len: Off) -> Self {
+    pub(crate) fn new(sb: &'a SuperBlock, backend: &'a B, offset: Off, len: Off) -> Self {
         Self {
+            sb,
             backend,
             offset,
             len,
         }
+    }
+    fn try_yield(&mut self) -> PosixResult<Box<dyn Buffer + 'a>> {
+        let accessor = self.sb.blk_access(self.offset);
+        let len = self.len.min(accessor.len);
+        let mut block = vec_with_capacity(len as usize)?;
+        self.backend.fill(&mut block, self.offset)?;
+        self.offset += len;
+        self.len -= len;
+        heap_alloc(TempBuffer::new(block, 0, len as usize)).map(|v| v as Box<dyn Buffer + 'a>)
     }
 }
 
@@ -106,19 +109,7 @@ where
         if self.len == 0 {
             return None;
         }
-
-        let result: Option<Self::Item> = self
-            .backend
-            .get_temp_buffer(self.offset, self.len)
-            .map_or_else(
-                |e| Some(Err(e)),
-                |buffer| {
-                    self.offset += buffer.content().len() as Off;
-                    self.len -= buffer.content().len() as Off;
-                    Some(heap_alloc(buffer).map(|v| v as Box<dyn Buffer + 'a>))
-                },
-            );
-        result
+        Some(self.try_yield())
     }
 }
 

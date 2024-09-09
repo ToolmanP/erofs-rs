@@ -91,22 +91,54 @@ pub(crate) type SuperBlockBuf = [u8; size_of::<SuperBlock>()];
 pub(crate) const SUPERBLOCK_EMPTY_BUF: SuperBlockBuf = [0; size_of::<SuperBlock>()];
 
 /// Used for external ondisk block buffer address calculation.
-pub(crate) struct DiskBlockAccessor {
+pub(crate) struct Accessor {
     pub(crate) base: Off,
     pub(crate) off: Off,
     pub(crate) len: Off,
+    pub(crate) nr: Off,
 }
 
-impl DiskBlockAccessor {
-    pub(crate) fn new(sb: &SuperBlock, address: Off) -> Self {
-        let bits = sb.blkszbits as Off;
+impl Accessor {
+    pub(crate) fn new(address: Off, bits: Off) -> Self {
         let sz = 1 << bits;
         let mask = sz - 1;
-        DiskBlockAccessor {
+        Accessor {
             base: (address >> bits) << bits,
             off: address & mask,
             len: sz - (address & mask),
+            nr: address >> bits,
         }
+    }
+}
+
+impl SuperBlock {
+    pub(crate) fn blk_access(&self, address: Off) -> Accessor {
+        Accessor::new(address, self.blkszbits as Off)
+    }
+
+    pub(crate) fn blknr(&self, pos: Off) -> Blk {
+        (pos >> self.blkszbits) as Blk
+    }
+
+    pub(crate) fn blkpos(&self, blk: Blk) -> Off {
+        (blk as Off) << self.blkszbits
+    }
+
+    pub(crate) fn blksz(&self) -> Off {
+        1 << self.blkszbits
+    }
+
+    pub(crate) fn blk_round_up(&self, addr: Off) -> Blk {
+        ((addr + self.blksz() - 1) >> self.blkszbits) as Blk
+    }
+
+    pub(crate) fn iloc(&self, nid: Nid) -> Off {
+        self.blkpos(self.meta_blkaddr) + ((nid as Off) << (5 as Off))
+    }
+
+    pub(crate) fn chunk_access(&self, format: ChunkFormat, address: Off) -> Accessor {
+        let chunkbits = format.chunkbits() + self.blkszbits as u16;
+        Accessor::new(address, chunkbits as Off)
     }
 }
 
@@ -117,47 +149,24 @@ where
     fn superblock(&self) -> &SuperBlock;
     fn backend(&self) -> &dyn Backend;
     fn as_filesystem(&self) -> &dyn FileSystem<I>;
-    fn blknr(&self, pos: Off) -> Blk {
-        (pos >> self.superblock().blkszbits) as Blk
-    }
-
-    fn blkpos(&self, blk: Blk) -> Off {
-        (blk as Off) << self.superblock().blkszbits
-    }
-
-    fn blkoff(&self, offset: Off) -> Off {
-        offset & (self.blksz() - 1)
-    }
-
-    fn blksz(&self) -> Off {
-        1 << self.superblock().blkszbits
-    }
-
-    fn blk_round_up(&self, addr: Off) -> Blk {
-        ((addr + self.blksz() - 1) >> self.superblock().blkszbits) as Blk
-    }
-
-    fn iloc(&self, nid: Nid) -> Off {
-        let sb = &self.superblock();
-        self.blkpos(sb.meta_blkaddr) + ((nid as Off) << (5 as Off))
-    }
 
     // block map goes here.
     fn device_info(&self) -> &DeviceInfo;
     fn flatmap(&self, inode: &I, offset: Off, inline: bool) -> MapResult {
-        let nblocks = self.blk_round_up(inode.info().file_size());
+        let sb = self.superblock();
+        let nblocks = sb.blk_round_up(inode.info().file_size());
         let blkaddr = match inode.info().spec() {
             Spec::Data(DataSpec::RawBlk(blkaddr)) => Ok(blkaddr),
             _ => Err(Errno::EUCLEAN),
         }?;
 
         let lastblk = if inline { nblocks - 1 } else { nblocks };
-        if offset < self.blkpos(lastblk) {
-            let len = inode.info().file_size().min(self.blkpos(lastblk)) - offset;
+        if offset < sb.blkpos(lastblk) {
+            let len = inode.info().file_size().min(sb.blkpos(lastblk)) - offset;
             Ok(Map {
                 logical: Segment { start: offset, len },
                 physical: Segment {
-                    start: self.blkpos(blkaddr) + offset,
+                    start: sb.blkpos(blkaddr) + offset,
                     len,
                 },
                 algorithm_format: 0,
@@ -166,13 +175,14 @@ where
             })
         } else if inline {
             let len = inode.info().file_size() - offset;
+            let accessor = sb.blk_access(offset);
             Ok(Map {
                 logical: Segment { start: offset, len },
                 physical: Segment {
-                    start: self.iloc(inode.nid())
+                    start: sb.iloc(inode.nid())
                         + inode.info().inode_size()
                         + inode.info().xattr_size()
-                        + self.blkoff(offset),
+                        + accessor.off,
                     len,
                 },
                 algorithm_format: 0,
@@ -185,40 +195,37 @@ where
     }
 
     fn chunk_map(&self, inode: &I, offset: Off) -> MapResult {
+        let sb = self.superblock();
         let chunkformat = match inode.info().spec() {
             Spec::Data(DataSpec::Chunk(chunkformat)) => Ok(chunkformat),
             _ => Err(Errno::EUCLEAN),
         }?;
-
-        let chunkbits = (chunkformat.chunkbits() + self.superblock().blkszbits as u16) as Off;
-        let chunknr = offset >> chunkbits;
-        let chunkoff = offset & ((1 << chunkbits) - 1);
+        let accessor = sb.chunk_access(chunkformat, offset);
 
         if chunkformat.is_chunkindex() {
             let unit = size_of::<ChunkIndex>() as Off;
             let pos = round!(
                 UP,
-                self.iloc(inode.nid())
+                self.superblock().iloc(inode.nid())
                     + inode.info().inode_size()
                     + inode.info().xattr_size()
-                    + unit * chunknr,
+                    + unit * accessor.nr,
                 unit
             );
             let mut buf = [0u8; size_of::<ChunkIndex>()];
             self.backend().fill(&mut buf, pos)?;
             let chunk_index = ChunkIndex::from(buf);
-
             if chunk_index.blkaddr == u32::MAX {
                 Err(Errno::EUCLEAN)
             } else {
                 Ok(Map {
                     logical: Segment {
-                        start: (chunknr << chunkbits) + chunkoff,
-                        len: 1 << chunkbits,
+                        start: accessor.base + accessor.off,
+                        len: accessor.len,
                     },
                     physical: Segment {
-                        start: self.blkpos(chunk_index.blkaddr) + chunkoff,
-                        len: 1 << chunkbits,
+                        start: sb.blkpos(chunk_index.blkaddr) + accessor.off,
+                        len: accessor.len,
                     },
                     algorithm_format: 0,
                     device_id: chunk_index.device_id & self.device_info().mask,
@@ -229,26 +236,26 @@ where
             let unit = 4;
             let pos = round!(
                 UP,
-                self.iloc(inode.nid())
+                sb.iloc(inode.nid())
                     + inode.info().inode_size()
                     + inode.info().xattr_size()
-                    + unit * chunknr,
+                    + unit * accessor.nr,
                 unit
             );
             let mut buf = [0u8; 4];
             self.backend().fill(&mut buf, pos)?;
             let blkaddr = u32::from_le_bytes(buf);
-            let len = (1 << chunkbits).min(inode.info().file_size() - offset);
+            let len = accessor.len.min(inode.info().file_size() - offset);
             if blkaddr == u32::MAX {
                 Err(Errno::EUCLEAN)
             } else {
                 Ok(Map {
                     logical: Segment {
-                        start: (chunknr << chunkbits) + chunkoff,
+                        start: accessor.base + accessor.off,
                         len,
                     },
                     physical: Segment {
-                        start: self.blkpos(blkaddr) + chunkoff,
+                        start: sb.blkpos(blkaddr) + accessor.off,
                         len,
                     },
                     algorithm_format: 0,
@@ -280,7 +287,7 @@ where
         offset: Off,
     ) -> PosixResult<Box<dyn BufferMapIter<'a> + 'b>>;
 
-    fn continous_iter<'a>(
+    fn continuous_iter<'a>(
         &'a self,
         offset: Off,
         len: Off,
@@ -309,12 +316,14 @@ where
         offset: Off,
         emitter: &mut dyn FnMut(Dirent<'_>, Off),
     ) -> PosixResult<()> {
+        let sb = self.superblock();
+        let accessor = sb.blk_access(offset);
         if offset > inode.info().file_size() {
             return PosixResult::Err(Errno::EUCLEAN);
         }
 
-        let map_offset = round!(DOWN, offset, self.blksz());
-        let blk_offset = round!(UP, self.blkoff(offset), size_of::<DirentDesc>() as Off);
+        let map_offset = round!(DOWN, offset, sb.blksz());
+        let blk_offset = round!(UP, accessor.off, size_of::<DirentDesc>() as Off);
 
         let mut map_iter = self.mapped_iter(inode, map_offset)?;
         let first_buf = map_iter.next().unwrap()?;
@@ -330,14 +339,14 @@ where
             }
         }
 
-        pos = round!(UP, pos, self.blksz());
+        pos = round!(UP, pos, sb.blksz());
 
         for buf in map_iter {
             for dirent in buf?.iter_dir() {
                 emitter(dirent, pos);
                 pos += size_of::<DirentDesc>() as Off;
             }
-            pos = round!(UP, pos, self.blksz());
+            pos = round!(UP, pos, sb.blksz());
         }
         Ok(())
     }
@@ -350,13 +359,15 @@ where
         nid: Nid,
         info: &InodeInfo,
     ) -> PosixResult<XAttrSharedEntries> {
-        let mut offset = self.iloc(nid) + info.inode_size();
+        let sb = self.superblock();
+        let mut offset = sb.iloc(nid) + info.inode_size();
         let mut buf = XATTR_ENTRY_SUMMARY_BUF;
         let mut indexes: Vec<u32> = Vec::new();
         self.backend().fill(&mut buf, offset)?;
+
         let header: XAttrSharedEntrySummary = XAttrSharedEntrySummary::from(buf);
         offset += size_of::<XAttrSharedEntrySummary>() as Off;
-        for buf in self.continous_iter(offset, (header.shared_count << 2) as Off)? {
+        for buf in self.continuous_iter(offset, (header.shared_count << 2) as Off)? {
             let data = buf?;
             extend_from_slice(&mut indexes, unsafe {
                 core::slice::from_raw_parts(
@@ -365,6 +376,7 @@ where
                 )
             })?;
         }
+
         Ok(XAttrSharedEntries {
             name_filter: header.name_filter,
             shared_indexes: indexes,
@@ -377,9 +389,9 @@ where
         name: &[u8],
         buffer: &mut Option<&mut [u8]>,
     ) -> PosixResult<XAttrValue> {
+        let sb = self.superblock();
         let shared_count = inode.xattrs_shared_entries().shared_indexes.len();
-
-        let inline_offset = self.iloc(inode.nid())
+        let inline_offset = sb.iloc(inode.nid())
             + inode.info().inode_size() as Off
             + size_of::<XAttrSharedEntrySummary>() as Off
             + 4 * shared_count as Off;
@@ -389,7 +401,7 @@ where
             - shared_count as Off * 4;
 
         if let Some(mut inline_provider) =
-            SkippableContinuousIter::try_new(self.continous_iter(inline_offset, inline_len)?)?
+            SkippableContinuousIter::try_new(self.continuous_iter(inline_offset, inline_len)?)?
         {
             while !inline_provider.eof() {
                 let header = inline_provider.get_entry_header()?;
@@ -411,8 +423,8 @@ where
         }
 
         for entry_index in inode.xattrs_shared_entries().shared_indexes.iter() {
-            let mut shared_provider = SkippableContinuousIter::try_new(self.continous_iter(
-                self.blkpos(self.superblock().xattr_blkaddr) + (*entry_index as Off) * 4,
+            let mut shared_provider = SkippableContinuousIter::try_new(self.continuous_iter(
+                sb.blkpos(self.superblock().xattr_blkaddr) + (*entry_index as Off) * 4,
                 u64::MAX,
             )?)?
             .unwrap();
@@ -437,8 +449,9 @@ where
     }
 
     fn list_xattrs(&self, inode: &I, buffer: &mut [u8]) -> PosixResult<usize> {
+        let sb = self.superblock();
         let shared_count = inode.xattrs_shared_entries().shared_indexes.len();
-        let inline_offset = self.iloc(inode.nid())
+        let inline_offset = sb.iloc(inode.nid())
             + inode.info().inode_size() as Off
             + size_of::<XAttrSharedEntrySummary>() as Off
             + shared_count as Off * 4;
@@ -448,7 +461,7 @@ where
             - shared_count as Off * 4;
 
         if let Some(mut inline_provider) =
-            SkippableContinuousIter::try_new(self.continous_iter(inline_offset, inline_len)?)?
+            SkippableContinuousIter::try_new(self.continuous_iter(inline_offset, inline_len)?)?
         {
             while !inline_provider.eof() {
                 let header = inline_provider.get_entry_header()?;
@@ -462,8 +475,8 @@ where
         }
 
         for index in inode.xattrs_shared_entries().shared_indexes.iter() {
-            let mut shared_provider = SkippableContinuousIter::try_new(self.continous_iter(
-                self.blkpos(self.superblock().xattr_blkaddr) + (*index as Off) * 4,
+            let mut shared_provider = SkippableContinuousIter::try_new(self.continuous_iter(
+                sb.blkpos(self.superblock().xattr_blkaddr) + (*index as Off) * 4,
                 u64::MAX,
             )?)?
             .unwrap();
@@ -579,7 +592,7 @@ pub(crate) mod tests {
         let mut hasher = Sha512::new();
         for block in sbi
             .filesystem
-            .continous_iter(map.physical.start, map.physical.len)
+            .continuous_iter(map.physical.start, map.physical.len)
             .unwrap()
         {
             hasher.update(block.unwrap().content());

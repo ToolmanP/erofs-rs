@@ -41,17 +41,18 @@ where
         offset: Off,
     ) -> PosixResult<Box<dyn BufferMapIter<'a> + 'b>> {
         heap_alloc(RefMapIter::new(
+            &self.sb,
             &self.backend,
             MapIter::new(self, inode, offset),
         ))
         .map(|v| v as Box<dyn BufferMapIter<'a> + 'b>)
     }
-    fn continous_iter<'a>(
+    fn continuous_iter<'a>(
         &'a self,
         offset: Off,
         len: Off,
     ) -> PosixResult<Box<dyn ContinuousBufferIter<'a> + 'a>> {
-        heap_alloc(ContinuousRefIter::new(&self.backend, offset, len))
+        heap_alloc(ContinuousRefIter::new(&self.sb, &self.backend, offset, len))
             .map(|v| v as Box<dyn ContinuousBufferIter<'a> + 'a>)
     }
     fn xattr_infixes(&self) -> &Vec<XAttrInfix> {
@@ -70,8 +71,14 @@ where
         let mut buf = SUPERBLOCK_EMPTY_BUF;
         backend.fill(&mut buf, EROFS_SUPER_OFFSET)?;
         let sb: SuperBlock = buf.into();
-        let infixes = get_xattr_infixes(&sb, &backend)?;
+        let infixes = get_xattr_infixes(&mut ContinuousRefIter::new(
+            &sb,
+            &backend,
+            sb.xattr_prefix_start as Off,
+            sb.xattr_prefix_count as Off * 4,
+        ))?;
         let device_info = get_device_infos(&mut ContinuousRefIter::new(
+            &sb,
             &backend,
             sb.devt_slotoff as Off * 128,
             sb.extra_devices as Off * 128,
@@ -89,7 +96,7 @@ where
 mod tests {
     extern crate std;
 
-    use super::data::RefBuffer;
+    use super::super::*;
     use super::superblock::backends::uncompressed::*;
     use super::superblock::tests::*;
     use super::*;
@@ -101,41 +108,19 @@ mod tests {
     impl Source for MmapMut {
         fn fill(&self, data: &mut [u8], offset: Off) -> PosixResult<u64> {
             self.as_buf(offset, data.len() as u64).map(|buf| {
-                let len = buf.content().len();
-                data[..len].clone_from_slice(buf.content());
+                let len = buf.len();
+                data[..len].clone_from_slice(buf);
                 len as Off
             })
         }
     }
 
     impl<'a> PageSource<'a> for MmapMut {
-        fn as_buf(&'a self, offset: crate::Off, len: crate::Off) -> PosixResult<RefBuffer<'a>> {
-            let accessor = TempBlockAccessor::from(offset);
-            let maxsize = self.len();
+        fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<&'a [u8]> {
+            let maxsize = self.len() as Off;
             let rlen = len.min(self.len() as u64 - offset);
-            let buf = &self[(accessor.base as usize)
-                ..maxsize.min((accessor.base + EROFS_TEMP_BLOCK_SZ) as usize)];
-
-            Ok(RefBuffer::new(
-                buf,
-                accessor.off as usize,
-                rlen as usize,
-                |_| {},
-            ))
-        }
-
-        fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> PosixResult<RefBufferMut<'a>> {
-            let accessor = TempBlockAccessor::from(offset);
-            let maxsize = self.len();
-            let rlen = len.min(self.len() as u64 - offset);
-            let buf = &mut self[(accessor.base as usize)
-                ..maxsize.min((accessor.base + EROFS_TEMP_BLOCK_SZ) as usize)];
-            Ok(RefBufferMut::new(
-                buf,
-                accessor.off as usize,
-                rlen as usize,
-                |_| {},
-            ))
+            let buf = &self[offset as usize..maxsize.min(offset + rlen) as usize];
+            Ok(buf)
         }
     }
 

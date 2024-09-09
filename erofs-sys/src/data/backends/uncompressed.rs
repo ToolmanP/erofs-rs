@@ -17,22 +17,15 @@ where
     fn fill(&self, data: &mut [u8], offset: Off) -> PosixResult<u64> {
         self.source.fill(data, offset)
     }
-    fn get_temp_buffer(&self, offset: Off, maxsize: Off) -> PosixResult<TempBuffer> {
-        self.source.get_temp_buffer(offset, maxsize)
-    }
 }
-
 impl<T> FileBackend for UncompressedBackend<T> where T: Source {}
 
 impl<'a, T> MemoryBackend<'a> for UncompressedBackend<T>
 where
     T: PageSource<'a>,
 {
-    fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<RefBuffer<'a>> {
+    fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<&'a [u8]> {
         self.source.as_buf(offset, len)
-    }
-    fn as_buf_mut(&'a mut self, offset: Off, len: Off) -> PosixResult<RefBufferMut<'a>> {
-        self.source.as_buf_mut(offset, len)
     }
 }
 

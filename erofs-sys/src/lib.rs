@@ -20,30 +20,6 @@ pub(crate) type Off = u64;
 pub(crate) type Nid = u64;
 
 pub(crate) const EROFS_SUPER_OFFSET: Off = 1024;
-pub(crate) const EROFS_TEMP_BLOCK: TempBlock = [0; EROFS_TEMP_BLOCK_SZ as usize];
-pub(crate) const EROFS_TEMP_BLOCK_BITS: Off = 12;
-pub(crate) const EROFS_TEMP_BLOCK_SZ: Off = 1 << EROFS_TEMP_BLOCK_BITS;
-pub(crate) const EROFS_TEMP_BLOCK_MASK: Off = EROFS_TEMP_BLOCK_SZ - 1;
-
-/// Erofs's maximum block is 4KB, so we use 4KB as the temp block size.
-pub(crate) type TempBlock = [u8; EROFS_TEMP_BLOCK_SZ as usize];
-
-/// Used for temp buffer address calculation
-pub(crate) struct TempBlockAccessor {
-    pub(crate) base: Off,
-    pub(crate) off: Off,
-    pub(crate) len: Off,
-}
-
-impl From<u64> for TempBlockAccessor {
-    fn from(address: Off) -> Self {
-        TempBlockAccessor {
-            base: (address >> EROFS_TEMP_BLOCK_BITS) << EROFS_TEMP_BLOCK_BITS,
-            off: address & EROFS_TEMP_BLOCK_MASK,
-            len: EROFS_TEMP_BLOCK_SZ - (address & EROFS_TEMP_BLOCK_MASK),
-        }
-    }
-}
 
 pub(crate) mod alloc_helper;
 pub(crate) mod compression;

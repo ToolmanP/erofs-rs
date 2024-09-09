@@ -53,7 +53,7 @@ where
     FS: FileSystem<I>,
     I: Inode,
 {
-    sbi: &'a FS,
+    fs: &'a FS,
     inode: &'b I,
     offset: Off,
     len: Off,
@@ -64,9 +64,9 @@ where
     FS: FileSystem<I>,
     I: Inode,
 {
-    pub(crate) fn new(sbi: &'a FS, inode: &'b I, offset: Off) -> Self {
+    pub(crate) fn new(fs: &'a FS, inode: &'b I, offset: Off) -> Self {
         Self {
-            sbi,
+            fs,
             inode,
             offset,
             len: inode.info().file_size(),
@@ -84,13 +84,11 @@ where
         if self.offset >= self.len {
             None
         } else {
-            let result = self.sbi.map(self.inode, self.offset);
+            let result = self.fs.map(self.inode, self.offset);
             match result {
-                Ok(mut m) => {
-                    let ba = DiskBlockAccessor::new(self.sbi.superblock(), m.physical.start);
-                    let len = m.physical.len.min(ba.len);
-                    m.physical.len = len;
-                    m.logical.len = len;
+                Ok(m) => {
+                    let accessor = self.fs.superblock().blk_access(m.physical.start);
+                    let len = m.physical.len.min(accessor.len);
                     self.offset += len;
                     Some(Ok(m))
                 }

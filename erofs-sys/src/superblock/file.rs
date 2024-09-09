@@ -34,18 +34,24 @@ where
         offset: Off,
     ) -> PosixResult<Box<dyn BufferMapIter<'a> + 'b>> {
         heap_alloc(TempBufferMapIter::new(
+            &self.sb,
             &self.backend,
             MapIter::new(self, inode, offset),
         ))
         .map(|v| v as Box<dyn BufferMapIter<'a> + 'b>)
     }
-    fn continous_iter<'a>(
+    fn continuous_iter<'a>(
         &'a self,
         offset: Off,
         len: Off,
     ) -> PosixResult<Box<dyn ContinuousBufferIter<'a> + 'a>> {
-        heap_alloc(ContinuousTempBufferIter::new(&self.backend, offset, len))
-            .map(|v| v as Box<dyn ContinuousBufferIter<'a> + 'a>)
+        heap_alloc(ContinuousTempBufferIter::new(
+            &self.sb,
+            &self.backend,
+            offset,
+            len,
+        ))
+        .map(|v| v as Box<dyn ContinuousBufferIter<'a> + 'a>)
     }
     fn xattr_infixes(&self) -> &Vec<XAttrInfix> {
         &self.infixes
@@ -66,8 +72,14 @@ where
         let mut buf = SUPERBLOCK_EMPTY_BUF;
         backend.fill(&mut buf, EROFS_SUPER_OFFSET)?;
         let sb: SuperBlock = buf.into();
-        let infixes = get_xattr_infixes(&sb, &backend)?;
+        let infixes = get_xattr_infixes(&mut ContinuousTempBufferIter::new(
+            &sb,
+            &backend,
+            sb.xattr_prefix_start as Off,
+            sb.xattr_prefix_count as Off * 4,
+        ))?;
         let device_info = get_device_infos(&mut ContinuousTempBufferIter::new(
+            &sb,
             &backend,
             sb.devt_slotoff as Off * 128,
             sb.extra_devices as Off * 128,
