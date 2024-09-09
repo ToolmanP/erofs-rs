@@ -24,7 +24,7 @@ pub(crate) trait FileSource: Source {}
 // Represents a memory source. Note that as_buf and as_buf_mut should only represent memory within
 // a page. Cross page memory is not supported and treated as an error.
 pub(crate) trait PageSource<'a>: Source {
-    fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<&'a [u8]>;
+    fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<RefBuffer<'a>>;
 }
 
 /// Represents a generic data access backend that is backed by some sort of data source.
@@ -39,7 +39,7 @@ pub(crate) trait FileBackend: Backend {}
 
 /// Represents a memory backend whose source is memory.
 pub(crate) trait MemoryBackend<'a>: Backend {
-    fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<&'a [u8]>;
+    fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<RefBuffer<'a>>;
 }
 
 /// Represents a TempBuffer which owns a temporary on-stack/on-heap buffer.

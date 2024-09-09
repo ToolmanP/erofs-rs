@@ -47,10 +47,7 @@ where
                     let accessor = self.sb.blk_access(m.physical.start);
                     let len = m.physical.len.min(accessor.len);
                     match self.backend.as_buf(m.physical.start, len) {
-                        Ok(buf) => Some(
-                            heap_alloc(RefBuffer::new(buf, 0, len as usize, |_| {}))
-                                .map(|v| v as Box<dyn Buffer + 'a>),
-                        ),
+                        Ok(buf) => Some(heap_alloc(buf).map(|v| v as Box<dyn Buffer + 'a>)),
                         Err(e) => Some(Err(e)),
                     }
                 }
@@ -109,10 +106,7 @@ where
             |buf| {
                 self.offset += len;
                 self.len -= len;
-                Some(
-                    heap_alloc(RefBuffer::new(buf, 0, len as usize, |_| {}))
-                        .map(|v| v as Box<dyn Buffer + 'a>),
-                )
+                Some(heap_alloc(buf).map(|v| v as Box<dyn Buffer + 'a>))
             },
         );
         result

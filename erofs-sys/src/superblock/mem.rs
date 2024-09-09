@@ -108,19 +108,19 @@ mod tests {
     impl Source for MmapMut {
         fn fill(&self, data: &mut [u8], offset: Off) -> PosixResult<u64> {
             self.as_buf(offset, data.len() as u64).map(|buf| {
-                let len = buf.len();
-                data[..len].clone_from_slice(buf);
+                let len = buf.content().len();
+                data[..len].clone_from_slice(buf.content());
                 len as Off
             })
         }
     }
 
     impl<'a> PageSource<'a> for MmapMut {
-        fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<&'a [u8]> {
+        fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<RefBuffer<'a>> {
             let maxsize = self.len() as Off;
             let rlen = len.min(self.len() as u64 - offset);
             let buf = &self[offset as usize..maxsize.min(offset + rlen) as usize];
-            Ok(buf)
+            Ok(RefBuffer::new(buf, 0, rlen as usize, |_| {}))
         }
     }
 

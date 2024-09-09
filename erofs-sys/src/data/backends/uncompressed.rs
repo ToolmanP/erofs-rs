@@ -24,7 +24,7 @@ impl<'a, T> MemoryBackend<'a> for UncompressedBackend<T>
 where
     T: PageSource<'a>,
 {
-    fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<&'a [u8]> {
+    fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<RefBuffer<'a>> {
         self.source.as_buf(offset, len)
     }
 }
