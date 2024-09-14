@@ -157,7 +157,7 @@ where
         let sb = self.superblock();
         let nblocks = sb.blk_round_up(inode.info().file_size());
         let blkaddr = match inode.info().spec() {
-            Spec::Data(DataSpec::RawBlk(blkaddr)) => Ok(blkaddr),
+            Spec::RawBlk(blkaddr) => Ok(blkaddr),
             _ => Err(EUCLEAN),
         }?;
 
@@ -198,7 +198,7 @@ where
     fn chunk_map(&self, inode: &I, offset: Off) -> MapResult {
         let sb = self.superblock();
         let chunkformat = match inode.info().spec() {
-            Spec::Data(DataSpec::Chunk(chunkformat)) => Ok(chunkformat),
+            Spec::Chunk(chunkformat) => Ok(chunkformat),
             _ => Err(EUCLEAN),
         }?;
         let accessor = sb.chunk_access(chunkformat, offset);

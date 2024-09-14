@@ -11,6 +11,18 @@ use core::mem::size_of;
 #[derive(Clone, Copy)]
 pub(crate) struct Format(u16);
 
+pub(crate) const INODE_VERSION_MASK: u16 = 0x1;
+pub(crate) const INODE_VERSION_BIT: u16 = 0;
+
+pub(crate) const INODE_LAYOUT_BIT: u16 = 1;
+pub(crate) const INODE_LAYOUT_MASK: u16 = 0x7;
+
+macro_rules! extract {
+    ($name: expr, $bit: expr, $mask: expr) => {
+        ($name >> $bit) & ($mask)
+    };
+}
+
 /// The Version of the Inode which represents whether this inode is extended or compact.
 /// Extended inodes have more infos about nlinks + mtime.
 /// This is documented in https://erofs.docs.kernel.org/en/latest/core_ondisk.html#inodes
@@ -27,12 +39,12 @@ pub(crate) enum Version {
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Layout {
-    FlatPlain = 0,
-    CompressedFull = 1,
-    FlatInline = 2,
-    CompressedCompact = 3,
-    Chunk = 4,
-    Unknown = 5,
+    FlatPlain,
+    CompressedFull,
+    FlatInline,
+    CompressedCompact,
+    Chunk,
+    Unknown,
 }
 
 #[repr(C)]
@@ -53,7 +65,7 @@ pub(crate) enum Type {
 /// This includes various infos and specs about the inode.
 impl Format {
     pub(crate) fn version(&self) -> Version {
-        match (self.0) & ((1 << 1) - 1) {
+        match extract!(self.0, INODE_VERSION_BIT, INODE_VERSION_MASK) {
             0 => Version::Compat,
             1 => Version::Extended,
             _ => Version::Unknown,
@@ -61,7 +73,7 @@ impl Format {
     }
 
     pub(crate) fn layout(&self) -> Layout {
-        match (self.0 >> 1) & ((1 << 3) - 1) {
+        match extract!(self.0, INODE_LAYOUT_BIT, INODE_LAYOUT_MASK) {
             0 => Layout::FlatPlain,
             1 => Layout::CompressedFull,
             2 => Layout::FlatInline,
@@ -158,37 +170,32 @@ impl ChunkFormat {
 
 /// Chunk description which represents whether this file consists of compound chunks or raw chunks;
 #[derive(Clone, Copy, Debug)]
+#[repr(C)]
 pub(crate) enum ChunkDesc {
     ChunkIndex(ChunkIndex),
-    RawPos(Blk),
-}
-
-/// Represents the data spec of the inode which is either consequentive raw blocks or in sparse chunk format.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum DataSpec {
-    RawBlk(u32),
-    Chunk(ChunkFormat),
+    BlkPos(Blk),
 }
 
 /// Represents the inode spec which is either data or device.
 #[derive(Clone, Copy, Debug)]
+#[repr(u32)]
 pub(crate) enum Spec {
-    Data(DataSpec),
+    Chunk(ChunkFormat),
+    RawBlk(u32),
     Device(u32),
+    CompressedBlocks(u32),
     Unknown,
 }
 
 /// Convert the spec from the format of the inode based on the layout.
-impl Spec {
-    pub(crate) fn data(u: &[u8; 4], layout: Layout) -> Self {
-        match layout {
-            Layout::FlatInline | Layout::FlatPlain => {
-                Spec::Data(DataSpec::RawBlk(u32::from_le_bytes(*u)))
+impl From<(&[u8; 4], Layout)> for Spec {
+    fn from(value: (&[u8; 4], Layout)) -> Self {
+        match value.1 {
+            Layout::FlatInline | Layout::FlatPlain => Spec::RawBlk(u32::from_le_bytes(*value.0)),
+            Layout::CompressedFull | Layout::CompressedCompact => {
+                Spec::CompressedBlocks(u32::from_le_bytes(*value.0))
             }
-            Layout::Chunk => {
-                let chunkformat = u16::from_le_bytes([u[0], u[1]]);
-                Spec::Data(DataSpec::Chunk(ChunkFormat(chunkformat)))
-            }
+            Layout::Chunk => Self::Chunk(ChunkFormat(u16::from_le_bytes([value.0[0], value.0[1]]))),
             // We don't support compressed inlines or compressed chunks currently.
             _ => Spec::Unknown,
         }
@@ -197,6 +204,17 @@ impl Spec {
 
 /// Helper functions for Inode Info.
 impl InodeInfo {
+    const S_IFMT: u16 = 0o170000;
+    const S_IFSOCK: u16 = 0o140000;
+    const S_IFLNK: u16 = 0o120000;
+    const S_IFREG: u16 = 0o100000;
+    const S_IFBLK: u16 = 0o60000;
+    const S_IFDIR: u16 = 0o40000;
+    const S_IFCHR: u16 = 0o20000;
+    const S_IFIFO: u16 = 0o10000;
+    const S_ISUID: u16 = 0o4000;
+    const S_ISGID: u16 = 0o2000;
+    const S_ISVTX: u16 = 0o1000;
     pub(crate) fn ino(&self) -> u32 {
         match self {
             Self::Extended(extended) => extended.i_ino,
@@ -251,9 +269,7 @@ impl InodeInfo {
         };
 
         match mode & 0o170000 {
-            0o40000 => Spec::data(u, self.format().layout()),
-            0o100000 => Spec::data(u, self.format().layout()),
-            0o120000 => Spec::data(u, self.format().layout()), // Real Data
+            0o40000 | 0o100000 | 0o120000 => Spec::from((u, self.format().layout())),
             // We don't support device inodes currently.
             _ => Spec::Unknown,
         }
@@ -264,14 +280,14 @@ impl InodeInfo {
             Self::Extended(extended) => extended.i_mode,
             Self::Compact(compact) => compact.i_mode,
         };
-        match mode & 0o170000 {
-            0o40000 => Type::Directory, // Directory
-            0o100000 => Type::Regular,  // Regular File
-            0o120000 => Type::Link,     // Symbolic Link
-            0o10000 => Type::Fifo,      // FIFO
-            0o140000 => Type::Socket,   // Socket
-            0o60000 => Type::Block,     // Block
-            0o20000 => Type::Character, // Character
+        match mode & Self::S_IFMT {
+            Self::S_IFDIR => Type::Directory, // Directory
+            Self::S_IFREG => Type::Regular,   // Regular File
+            Self::S_IFLNK => Type::Link,      // Symbolic Link
+            Self::S_IFIFO => Type::Fifo,      // FIFO
+            Self::S_IFSOCK => Type::Socket,   // Socket
+            Self::S_IFBLK => Type::Block,     // Block
+            Self::S_IFCHR => Type::Character, // Character
             _ => Type::Unknown,
         }
     }
