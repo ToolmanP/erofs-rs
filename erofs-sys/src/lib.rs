@@ -1,7 +1,7 @@
 #![no_std]
 #![allow(dead_code)]
 // Copyright 2024 Yiyang Wu
-// SPDX-License-Identifier: MIT or GPL-2.0-later
+// SPDX-License-Identifier: MIT or GPL-2.0-or-later
 
 //! A pure Rust implementation of the EROFS filesystem.
 //! Technical Details are documented in the [EROFS Documentation](https://erofs.docs.kernel.org/en/latest/)

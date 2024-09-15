@@ -1,4 +1,4 @@
-// Copyright 2024 Yiyang Wu SPDX-License-Identifier: MIT or GPL-2.0-later
+// Copyright 2024 Yiyang Wu SPDX-License-Identifier: MIT or GPL-2.0-or-later
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
