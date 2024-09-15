@@ -168,14 +168,6 @@ impl ChunkFormat {
     }
 }
 
-/// Chunk description which represents whether this file consists of compound chunks or raw chunks;
-#[derive(Clone, Copy, Debug)]
-#[repr(C)]
-pub(crate) enum ChunkDesc {
-    ChunkIndex(ChunkIndex),
-    BlkPos(Blk),
-}
-
 /// Represents the inode spec which is either data or device.
 #[derive(Clone, Copy, Debug)]
 #[repr(u32)]
