@@ -4,6 +4,7 @@
 use super::superblock::*;
 use super::xattrs::*;
 use super::*;
+use core::ffi::*;
 use core::mem::size_of;
 
 /// Represents the compact bitfield of the Erofs Inode format.
@@ -17,6 +18,7 @@ pub(crate) const INODE_VERSION_BIT: u16 = 0;
 pub(crate) const INODE_LAYOUT_BIT: u16 = 1;
 pub(crate) const INODE_LAYOUT_MASK: u16 = 0x7;
 
+/// Helper macro to extract property from the bitfield.
 macro_rules! extract {
     ($name: expr, $bit: expr, $mask: expr) => {
         ($name >> $bit) & ($mask)
@@ -235,20 +237,6 @@ impl InodeInfo {
         }
     }
 
-    pub(crate) fn xattr_size(&self) -> Off {
-        match self {
-            Self::Extended(extended) => 12 + 4 * (extended.i_xattr_icount as u64 - 1),
-            Self::Compact(_) => 0,
-        }
-    }
-
-    pub(crate) fn xattr_count(&self) -> u16 {
-        match self {
-            Self::Extended(extended) => extended.i_xattr_icount,
-            Self::Compact(compact) => compact.i_xattr_icount,
-        }
-    }
-
     pub(crate) fn spec(&self) -> Spec {
         let mode = match self {
             Self::Extended(extended) => extended.i_mode,
@@ -281,6 +269,23 @@ impl InodeInfo {
             Self::S_IFBLK => Type::Block,     // Block
             Self::S_IFCHR => Type::Character, // Character
             _ => Type::Unknown,
+        }
+    }
+
+    pub(crate) fn xattr_size(&self) -> Off {
+        match self {
+            Self::Extended(extended) => {
+                size_of::<XAttrSharedEntrySummary>() as Off
+                    + (size_of::<c_int>() as Off) * (extended.i_xattr_icount as Off - 1)
+            }
+            Self::Compact(_) => 0,
+        }
+    }
+
+    pub(crate) fn xattr_count(&self) -> u16 {
+        match self {
+            Self::Extended(extended) => extended.i_xattr_icount,
+            Self::Compact(compact) => compact.i_xattr_icount,
         }
     }
 }
