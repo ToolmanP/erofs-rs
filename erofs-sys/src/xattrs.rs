@@ -23,7 +23,7 @@ pub(crate) struct XAttrSharedEntrySummary {
 impl From<[u8; 12]> for XAttrSharedEntrySummary {
     fn from(value: [u8; 12]) -> Self {
         Self {
-            name_filter: u32::from_le_bytes(value[0..4].try_into().unwrap()),
+            name_filter: u32::from_le_bytes([value[0], value[1], value[2], value[3]]),
             shared_count: value[4],
             reserved: value[5..12].try_into().unwrap(),
         }

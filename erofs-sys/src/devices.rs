@@ -28,8 +28,8 @@ impl From<[u8; 128]> for DeviceSlot {
     fn from(data: [u8; 128]) -> Self {
         Self {
             tags: data[0..64].try_into().unwrap(),
-            blocks: u32::from_le_bytes(data[64..68].try_into().unwrap()),
-            mapped_blocks: u32::from_le_bytes(data[68..72].try_into().unwrap()),
+            blocks: u32::from_le_bytes([data[64], data[65], data[66], data[67]]),
+            mapped_blocks: u32::from_le_bytes([data[68], data[69], data[70], data[71]]),
             reserved: data[72..128].try_into().unwrap(),
         }
     }

@@ -318,16 +318,16 @@ impl TryFrom<CompactInodeInfoBuf> for CompactInodeInfo {
     type Error = InodeError;
     fn try_from(value: CompactInodeInfoBuf) -> Result<Self, Self::Error> {
         let inode: CompactInodeInfo = Self {
-            i_format: Format(u16::from_le_bytes(value[0..2].try_into().unwrap())),
-            i_xattr_icount: u16::from_le_bytes(value[2..4].try_into().unwrap()),
-            i_mode: u16::from_le_bytes(value[4..6].try_into().unwrap()),
-            i_nlink: u16::from_le_bytes(value[6..8].try_into().unwrap()),
-            i_size: u32::from_le_bytes(value[8..12].try_into().unwrap()),
+            i_format: Format(u16::from_le_bytes([value[0], value[1]])),
+            i_xattr_icount: u16::from_le_bytes([value[2], value[3]]),
+            i_mode: u16::from_le_bytes([value[4], value[5]]),
+            i_nlink: u16::from_le_bytes([value[6], value[7]]),
+            i_size: u32::from_le_bytes([value[8], value[9], value[10], value[11]]),
             i_reserved: value[12..16].try_into().unwrap(),
             i_u: value[16..20].try_into().unwrap(),
-            i_ino: u32::from_le_bytes(value[20..24].try_into().unwrap()),
-            i_uid: u16::from_le_bytes(value[24..26].try_into().unwrap()),
-            i_gid: u16::from_le_bytes(value[26..28].try_into().unwrap()),
+            i_ino: u32::from_le_bytes([value[20], value[21], value[22], value[23]]),
+            i_uid: u16::from_le_bytes([value[24], value[25]]),
+            i_gid: u16::from_le_bytes([value[26], value[27]]),
             i_reserved2: value[28..32].try_into().unwrap(),
         };
         let ifmt = &inode.i_format;
@@ -369,18 +369,22 @@ where
                         )?;
                     }
                     Ok(InodeInfo::Extended(ExtendedInodeInfo {
-                        i_format: Format(u16::from_le_bytes(buf[0..2].try_into().unwrap())),
-                        i_xattr_icount: u16::from_le_bytes(buf[2..4].try_into().unwrap()),
-                        i_mode: u16::from_le_bytes(buf[4..6].try_into().unwrap()),
+                        i_format: Format(u16::from_le_bytes([buf[0], buf[1]])),
+                        i_xattr_icount: u16::from_le_bytes([buf[2], buf[3]]),
+                        i_mode: u16::from_le_bytes([buf[4], buf[5]]),
                         i_reserved: buf[6..8].try_into().unwrap(),
-                        i_size: u64::from_le_bytes(buf[8..16].try_into().unwrap()),
+                        i_size: u64::from_le_bytes([
+                            buf[8], buf[9], buf[10], buf[11], buf[12], buf[13], buf[14], buf[15],
+                        ]),
                         i_u: buf[16..20].try_into().unwrap(),
-                        i_ino: u32::from_le_bytes(buf[20..24].try_into().unwrap()),
-                        i_uid: u32::from_le_bytes(buf[24..28].try_into().unwrap()),
-                        i_gid: u32::from_le_bytes(buf[28..32].try_into().unwrap()),
-                        i_mtime: u64::from_le_bytes(buf[32..40].try_into().unwrap()),
-                        i_mtime_nsec: u32::from_le_bytes(buf[40..44].try_into().unwrap()),
-                        i_nlink: u32::from_le_bytes(buf[44..48].try_into().unwrap()),
+                        i_ino: u32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]),
+                        i_uid: u32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]),
+                        i_gid: u32::from_le_bytes([buf[28], buf[29], buf[30], buf[31]]),
+                        i_mtime: u64::from_le_bytes([
+                            buf[32], buf[33], buf[34], buf[35], buf[36], buf[37], buf[38], buf[39],
+                        ]),
+                        i_mtime_nsec: u32::from_le_bytes([buf[40], buf[41], buf[42], buf[43]]),
+                        i_nlink: u32::from_le_bytes([buf[44], buf[45], buf[46], buf[47]]),
                         i_reserved2: buf[48..64].try_into().unwrap(),
                     }))
                 }

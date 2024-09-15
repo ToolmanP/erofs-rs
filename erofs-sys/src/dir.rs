@@ -24,8 +24,10 @@ pub(crate) struct Dirent<'a> {
 impl From<[u8; size_of::<DirentDesc>()]> for DirentDesc {
     fn from(data: [u8; size_of::<DirentDesc>()]) -> Self {
         Self {
-            nid: u64::from_le_bytes(data[0..8].try_into().unwrap()),
-            nameoff: u16::from_le_bytes(data[8..10].try_into().unwrap()),
+            nid: u64::from_le_bytes([
+                data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+            ]),
+            nameoff: u16::from_le_bytes([data[8], data[9]]),
             file_type: data[10],
             reserved: data[11],
         }
