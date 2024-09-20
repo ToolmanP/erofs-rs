@@ -46,7 +46,10 @@ where
                 Ok(m) => {
                     let accessor = self.sb.blk_access(m.physical.start);
                     let len = m.physical.len.min(accessor.len);
-                    match self.backend.as_buf(m.physical.start, len) {
+                    match self
+                        .backend
+                        .as_buf(m.device_id as i32, m.physical.start, len)
+                    {
                         Ok(buf) => Some(heap_alloc(buf).map(|v| v as Box<dyn Buffer + 'a>)),
                         Err(e) => Some(Err(e)),
                     }
@@ -101,7 +104,7 @@ where
         }
         let accessor = self.sb.blk_access(self.offset);
         let len = accessor.len.min(self.len);
-        let result: Option<Self::Item> = self.backend.as_buf(self.offset, len).map_or_else(
+        let result: Option<Self::Item> = self.backend.as_buf(0, self.offset, len).map_or_else(
             |e| Some(Err(e)),
             |buf| {
                 self.offset += len;

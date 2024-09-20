@@ -36,7 +36,8 @@ where
         let accessor = self.sb.blk_access(map.physical.start);
         let len = accessor.len.min(map.physical.len);
         let mut block = vec_with_capacity(len as usize).unwrap();
-        self.backend.fill(&mut block, map.physical.start)?;
+        self.backend
+            .fill(&mut block, map.device_id as i32, map.physical.start)?;
         heap_alloc(TempBuffer::new(block, 0, len as usize)).map(|v| v as Box<dyn Buffer + 'a>)
     }
 }
@@ -93,7 +94,7 @@ where
         let accessor = self.sb.blk_access(self.offset);
         let len = self.len.min(accessor.len);
         let mut block = vec_with_capacity(len as usize)?;
-        self.backend.fill(&mut block, self.offset)?;
+        self.backend.fill(&mut block, 0, self.offset)?;
         self.offset += len;
         self.len -= len;
         heap_alloc(TempBuffer::new(block, 0, len as usize)).map(|v| v as Box<dyn Buffer + 'a>)

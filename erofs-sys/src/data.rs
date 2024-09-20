@@ -15,7 +15,7 @@ use super::*;
 /// Represent some sort of generic data source. This cound be file, memory or even network.
 /// Note that users should never use this directly please use backends instead.
 pub(crate) trait Source {
-    fn fill(&self, data: &mut [u8], offset: Off) -> PosixResult<u64>;
+    fn fill(&self, data: &mut [u8], device_id: i32, offset: Off) -> PosixResult<u64>;
 }
 
 /// Represents a file source.
@@ -24,14 +24,14 @@ pub(crate) trait FileSource: Source {}
 // Represents a memory source. Note that as_buf and as_buf_mut should only represent memory within
 // a page. Cross page memory is not supported and treated as an error.
 pub(crate) trait PageSource<'a>: Source {
-    fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<RefBuffer<'a>>;
+    fn as_buf(&'a self, device_id: i32, offset: Off, len: Off) -> PosixResult<RefBuffer<'a>>;
 }
 
 /// Represents a generic data access backend that is backed by some sort of data source.
 /// This often has temporary buffers to decompress the data from the data source.
 /// The method signatures are the same as those of the Source trait.
 pub(crate) trait Backend {
-    fn fill(&self, data: &mut [u8], offset: Off) -> PosixResult<u64>;
+    fn fill(&self, data: &mut [u8], device_id: i32, offset: Off) -> PosixResult<u64>;
 }
 
 /// Represents a file backend whose source is a file.
@@ -39,7 +39,7 @@ pub(crate) trait FileBackend: Backend {}
 
 /// Represents a memory backend whose source is memory.
 pub(crate) trait MemoryBackend<'a>: Backend {
-    fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<RefBuffer<'a>>;
+    fn as_buf(&'a self, device_id: i32, offset: Off, len: Off) -> PosixResult<RefBuffer<'a>>;
 }
 
 /// Represents a TempBuffer which owns a temporary on-stack/on-heap buffer.

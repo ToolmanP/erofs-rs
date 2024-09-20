@@ -223,7 +223,7 @@ where
                 unit
             );
             let mut buf = [0u8; size_of::<ChunkIndex>()];
-            self.backend().fill(&mut buf, pos)?;
+            self.backend().fill(&mut buf, 0, pos)?;
             let chunk_index = ChunkIndex::from(buf);
             if chunk_index.blkaddr == u32::MAX {
                 Err(EUCLEAN)
@@ -253,7 +253,7 @@ where
                 unit
             );
             let mut buf = [0u8; 4];
-            self.backend().fill(&mut buf, pos)?;
+            self.backend().fill(&mut buf, 0, pos)?;
             let blkaddr = u32::from_le_bytes(buf);
             let len = accessor.len.min(inode.info().file_size() - offset);
             if blkaddr == u32::MAX {
@@ -373,7 +373,7 @@ where
         let mut offset = sb.iloc(nid) + info.inode_size();
         let mut buf = XATTR_ENTRY_SUMMARY_BUF;
         let mut indexes: Vec<u32> = Vec::new();
-        self.backend().fill(&mut buf, offset)?;
+        self.backend().fill(&mut buf, 0, offset)?;
 
         let header: XAttrSharedEntrySummary = XAttrSharedEntrySummary::from(buf);
         offset += size_of::<XAttrSharedEntrySummary>() as Off;
@@ -574,7 +574,7 @@ pub(crate) mod tests {
         assert_eq!(sbi.filesystem.superblock().magic, SB_MAGIC);
     }
 
-    fn test_filesystem_ilookup(sbi: &mut SimpleBufferedFileSystem) {
+    fn test_filesystem_ilookup1(sbi: &mut SimpleBufferedFileSystem) {
         const LIPSUM_HEX: [u8;64] = hex!("6846740fd4c03c86524d39e0012ec8eb1e4b87e8a90c65227904148bc0e4d0592c209151a736946133cd57f7ec59c4e8a445e7732322dda9ce356f8d0100c4ca");
         const LIPSUM_FILE_SIZE: u64 = 5060;
         const LIPSUM_TYPE: Type = Type::Regular;
@@ -590,6 +590,21 @@ pub(crate) mod tests {
         assert_eq!(result[..], LIPSUM_HEX);
     }
 
+    fn test_filesystem_ilookup2(sbi: &mut SimpleBufferedFileSystem) {
+        const IMAGE_HEX: [u8;64] = hex!("2d0f63b3ca997d30d65f70f32bf97038d92d1f4e642fe48ede697ab73e936e5b2bff9b556a786340d9385993b2e7f6744cbbf8b4660c55b33c907a3a2ced33b5");
+        const IMAGE_FILE_SIZE: u64 = 13735;
+        const IMAGE_TYPE: Type = Type::Regular;
+
+        let inode = lookup(&*sbi.filesystem, &mut sbi.inodes, "/images/inabukumori.jpg").unwrap();
+        assert_eq!(inode.info().inode_type(), IMAGE_TYPE);
+        assert_eq!(inode.info().file_size(), IMAGE_FILE_SIZE);
+        let mut hasher = Sha512::new();
+        for block in sbi.filesystem.mapped_iter(inode, 0).unwrap() {
+            hasher.update(block.unwrap().content());
+        }
+        let result = hasher.finalize();
+        assert_eq!(result[..], IMAGE_HEX);
+    }
     fn test_continous_iter(sbi: &mut SimpleBufferedFileSystem) {
         const README_CHECKSUM: [u8; 64] = hex!("99fffc75aec028f417d9782fffed6c5d877a29ad1b16fc62bfeb168cdaf8db6db2bad1814904cd0fa18a2396c2c618041682a010601f4052b9895138d4ed6f16");
         const README_FILE_SIZE: u64 = 38;
@@ -673,7 +688,8 @@ pub(crate) mod tests {
 
     pub(crate) fn test_filesystem(sbi: &mut SimpleBufferedFileSystem) {
         test_superblock_def(sbi);
-        test_filesystem_ilookup(sbi);
+        test_filesystem_ilookup1(sbi);
+        test_filesystem_ilookup2(sbi);
         test_continous_iter(sbi);
         test_get_file_xattr(sbi);
         test_get_dir_xattr(sbi);

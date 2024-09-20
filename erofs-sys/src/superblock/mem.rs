@@ -69,7 +69,7 @@ where
 {
     pub(crate) fn try_new(backend: T) -> PosixResult<Self> {
         let mut buf = SUPERBLOCK_EMPTY_BUF;
-        backend.fill(&mut buf, EROFS_SUPER_OFFSET)?;
+        backend.fill(&mut buf, 0, EROFS_SUPER_OFFSET)?;
         let sb: SuperBlock = buf.into();
         let infixes = get_xattr_infixes(&mut ContinuousRefIter::new(
             &sb,
@@ -106,17 +106,18 @@ mod tests {
 
     // Impl MmapMut to simulate a in-memory image/filesystem
     impl Source for MmapMut {
-        fn fill(&self, data: &mut [u8], offset: Off) -> PosixResult<u64> {
-            self.as_buf(offset, data.len() as u64).map(|buf| {
-                let len = buf.content().len();
-                data[..len].clone_from_slice(buf.content());
-                len as Off
-            })
+        fn fill(&self, data: &mut [u8], _device_id: i32, offset: Off) -> PosixResult<u64> {
+            self.as_buf(_device_id, offset, data.len() as u64)
+                .map(|buf| {
+                    let len = buf.content().len();
+                    data[..len].clone_from_slice(buf.content());
+                    len as Off
+                })
         }
     }
 
     impl<'a> PageSource<'a> for MmapMut {
-        fn as_buf(&'a self, offset: Off, len: Off) -> PosixResult<RefBuffer<'a>> {
+        fn as_buf(&'a self, _device_id: i32, offset: Off, len: Off) -> PosixResult<RefBuffer<'a>> {
             let maxsize = self.len() as Off;
             let rlen = len.min(self.len() as u64 - offset);
             let buf = &self[offset as usize..maxsize.min(offset + rlen) as usize];

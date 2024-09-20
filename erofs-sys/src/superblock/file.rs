@@ -70,7 +70,7 @@ where
 {
     pub(crate) fn try_new(backend: T) -> PosixResult<Self> {
         let mut buf = SUPERBLOCK_EMPTY_BUF;
-        backend.fill(&mut buf, EROFS_SUPER_OFFSET)?;
+        backend.fill(&mut buf, 0, EROFS_SUPER_OFFSET)?;
         let sb: SuperBlock = buf.into();
         let infixes = get_xattr_infixes(&mut ContinuousTempBufferIter::new(
             &sb,
@@ -107,7 +107,7 @@ mod tests {
     use std::os::unix::fs::FileExt;
 
     impl Source for File {
-        fn fill(&self, data: &mut [u8], offset: Off) -> PosixResult<u64> {
+        fn fill(&self, data: &mut [u8], _device_id: i32, offset: Off) -> PosixResult<u64> {
             self.read_at(data, offset)
                 .map_or(Err(ERANGE), |size| Ok(size as u64))
         }

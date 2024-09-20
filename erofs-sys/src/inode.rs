@@ -351,7 +351,7 @@ where
         let offset = sb.iloc(nid);
         let accessor = sb.blk_access(offset);
         let mut buf: ExtendedInodeInfoBuf = DEFAULT_INODE_BUF;
-        f.backend().fill(&mut buf[0..32], offset)?;
+        f.backend().fill(&mut buf[0..32], 0, offset)?;
         let compact_buf: CompactInodeInfoBuf = buf[0..32].try_into().unwrap();
         let r: Result<CompactInodeInfo, InodeError> = CompactInodeInfo::try_from(compact_buf);
         match r {
@@ -359,12 +359,16 @@ where
             Err(e) => match e {
                 InodeError::VersionError => {
                     let gotten = (sb.blksz() - accessor.off + 32).min(64);
-                    f.backend()
-                        .fill(&mut buf[32..(32 + gotten).min(64) as usize], offset + 32)?;
+                    f.backend().fill(
+                        &mut buf[32..(32 + gotten).min(64) as usize],
+                        0,
+                        offset + 32,
+                    )?;
 
                     if gotten < 32 {
                         f.backend().fill(
                             &mut buf[(32 + gotten) as usize..64],
+                            0,
                             sb.blkpos(sb.blknr(offset) + 1),
                         )?;
                     }
