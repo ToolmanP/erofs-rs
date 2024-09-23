@@ -16,7 +16,7 @@ pub(crate) struct DirentDesc {
 
 /// In memory representation of a real directory entry.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Dirent<'a> {
+pub struct Dirent<'a> {
     pub(crate) desc: DirentDesc,
     pub(crate) name: &'a [u8],
 }
@@ -36,7 +36,7 @@ impl From<[u8; size_of::<DirentDesc>()]> for DirentDesc {
 
 /// Create a collection of directory entries from a buffer.
 /// This is a helper struct to iterate over directory entries.
-pub(crate) struct DirCollection<'a> {
+pub struct DirCollection<'a> {
     data: &'a [u8],
     offset: usize,
     total: usize,
@@ -94,7 +94,8 @@ impl<'a> Iterator for DirCollection<'a> {
 }
 
 impl<'a> Dirent<'a> {
-    pub(crate) fn dirname(&self) -> &'a [u8] {
+    /// Dirname
+    pub fn dirname(&self) -> &'a [u8] {
         self.name
     }
 }

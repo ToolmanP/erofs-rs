@@ -33,9 +33,11 @@ impl From<[u8; 12]> for XAttrSharedEntrySummary {
 pub(crate) const XATTR_ENTRY_SUMMARY_BUF: [u8; 12] = [0u8; 12];
 
 /// Represented as a inmemory memory entry index header used by SuperBlockInfo.
-pub(crate) struct XAttrSharedEntries {
-    pub(crate) name_filter: u32,
-    pub(crate) shared_indexes: Vec<u32>,
+pub struct XAttrSharedEntries {
+    /// name filter for xattrs name
+    pub name_filter: u32,
+    /// shared indexes for prefices and infices.
+    pub shared_indexes: Vec<u32>,
 }
 
 /// Represents the name index for infixes or prefixes.
@@ -98,7 +100,7 @@ impl From<[u8; 4]> for XAttrEntryHeader {
 
 /// Xattr Common Infix holds the prefix index in the first byte and all the common infix data in
 /// the rest of the bytes.
-pub(crate) struct XAttrInfix(pub(crate) Vec<u8>);
+pub struct XAttrInfix(pub(crate) Vec<u8>);
 
 impl XAttrInfix {
     fn prefix_index(&self) -> u8 {
@@ -125,8 +127,10 @@ pub(crate) const EROFS_XATTRS_PREFIXS: [&[u8]; 7] = [
 
 /// Represents the value of an xattr entry or the size of it if the buffer is present in the query.
 #[derive(Debug)]
-pub(crate) enum XAttrValue {
+pub enum XAttrValue {
+    /// Buffer size when buffer option is not None.
     Buffer(usize),
+    /// Heap Buffer when buffer option is None.
     Vec(Vec<u8>),
 }
 

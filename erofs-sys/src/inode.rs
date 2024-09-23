@@ -90,7 +90,7 @@ impl Format {
 /// This is documented in https://erofs.docs.kernel.org/en/latest/core_ondisk.html#inodes
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub(crate) struct CompactInodeInfo {
+pub struct CompactInodeInfo {
     pub(crate) i_format: Format,
     pub(crate) i_xattr_icount: u16,
     pub(crate) i_mode: u16,
@@ -108,7 +108,7 @@ pub(crate) struct CompactInodeInfo {
 /// This is documented in https://erofs.docs.kernel.org/en/latest/core_ondisk.html#inodes
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub(crate) struct ExtendedInodeInfo {
+pub struct ExtendedInodeInfo {
     pub(crate) i_format: Format,
     pub(crate) i_xattr_icount: u16,
     pub(crate) i_mode: u16,
@@ -126,8 +126,10 @@ pub(crate) struct ExtendedInodeInfo {
 
 /// Represents the inode info which is either compact or extended.
 #[derive(Clone, Copy)]
-pub(crate) enum InodeInfo {
+pub enum InodeInfo {
+    /// Extended
     Extended(ExtendedInodeInfo),
+    /// Compact
     Compact(CompactInodeInfo),
 }
 
@@ -295,22 +297,28 @@ pub(crate) type ExtendedInodeInfoBuf = [u8; size_of::<ExtendedInodeInfo>()];
 pub(crate) const DEFAULT_INODE_BUF: ExtendedInodeInfoBuf = [0; size_of::<ExtendedInodeInfo>()];
 
 /// The inode trait which represents the inode in the filesystem.
-pub(crate) trait Inode: Sized {
+pub trait Inode: Sized {
+    /// New Inode
     fn new(
         _sb: &SuperBlock,
         info: InodeInfo,
         nid: Nid,
         xattrs_shared_entries: XAttrSharedEntries,
     ) -> Self;
+    /// Info
     fn info(&self) -> &InodeInfo;
+    /// SharedEntries
     fn xattrs_shared_entries(&self) -> &XAttrSharedEntries;
+    /// Nid
     fn nid(&self) -> Nid;
 }
 
 /// Represents the error which occurs when trying to convert the inode.
 #[derive(Debug)]
-pub(crate) enum InodeError {
+pub enum InodeError {
+    /// Version Error
     VersionError,
+    /// Posix Error
     PosixError(Errno),
 }
 
@@ -399,9 +407,11 @@ where
 }
 
 /// Represents the inode collection which is a hashmap of inodes.
-pub(crate) trait InodeCollection {
+pub trait InodeCollection {
+    /// Inode Assocaited Types
     type I: Inode + Sized;
 
+    /// get the inode based on nid and filesystem
     fn iget(&mut self, nid: Nid, filesystem: &dyn FileSystem<Self::I>)
         -> PosixResult<&mut Self::I>;
 }

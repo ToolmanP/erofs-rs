@@ -23,18 +23,24 @@ pub(crate) const EROFS_SUPER_OFFSET: Off = 1024;
 
 pub(crate) mod alloc_helper;
 pub(crate) mod compression;
-pub(crate) mod data;
+/// Data Module
+pub mod data;
 pub(crate) mod devices;
-pub(crate) mod dir;
-pub(crate) mod errnos;
-pub(crate) mod inode;
+/// Dir Module
+pub mod dir;
+/// Errno Module
+pub mod errnos;
+/// Inode Module
+pub mod inode;
 pub(crate) mod map;
-pub(crate) mod operations;
+/// Operations Modules
+pub mod operations;
 pub(crate) mod superblock;
-pub(crate) mod xattrs;
+/// Xattrs Module
+pub mod xattrs;
 pub(crate) use errnos::Errno;
-
-pub(crate) type PosixResult<T> = Result<T, Errno>;
+/// Documentation
+pub type PosixResult<T> = Result<T, errnos::Errno>;
 
 /// Helper macro to round up or down a number.
 #[macro_export]
@@ -46,3 +52,5 @@ macro_rules! round {
         ($x / $y) * $y
     };
 }
+
+pub use superblock::{file, mem};

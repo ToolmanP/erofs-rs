@@ -21,7 +21,7 @@ pub(crate) struct Segment {
 
 #[derive(Debug, Default)]
 #[repr(C)]
-pub(crate) struct Map {
+pub struct Map {
     pub(crate) logical: Segment,
     pub(crate) physical: Segment,
     pub(crate) device_id: u16,

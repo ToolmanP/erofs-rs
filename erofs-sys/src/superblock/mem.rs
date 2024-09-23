@@ -9,7 +9,8 @@ use super::*;
 // Note that we do not want the lifetime to infect the MemFileSystem which may have a impact on
 // the content iter below. Just use HRTB to dodge the borrow checker.
 
-pub(crate) struct MemFileSystem<T>
+/// Memory Backed Filesystem
+pub struct MemFileSystem<T>
 where
     T: for<'a> MemoryBackend<'a>,
 {
@@ -67,7 +68,8 @@ impl<T> MemFileSystem<T>
 where
     T: for<'a> MemoryBackend<'a>,
 {
-    pub(crate) fn try_new(backend: T) -> PosixResult<Self> {
+    /// Try to Create a memory backend based FileSystem.
+    pub fn try_new(backend: T) -> PosixResult<Self> {
         let mut buf = SUPERBLOCK_EMPTY_BUF;
         backend.fill(&mut buf, 0, EROFS_SUPER_OFFSET)?;
         let sb: SuperBlock = buf.into();

@@ -3,7 +3,8 @@
 
 use super::super::*;
 
-pub(crate) struct UncompressedBackend<T>
+/// An uncompressed Backend for Data Source
+pub struct UncompressedBackend<T>
 where
     T: Source,
 {
@@ -30,7 +31,8 @@ where
 }
 
 impl<T: Source> UncompressedBackend<T> {
-    pub(crate) fn new(source: T) -> Self {
+    /// Create a new uncompressed backend from source.
+    pub fn new(source: T) -> Self {
         Self { source }
     }
 }

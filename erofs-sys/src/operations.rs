@@ -16,7 +16,8 @@ use super::*;
 
 use crate::round;
 
-pub(crate) fn read_inode<'a, I, C>(
+/// Read inode from inode collection.
+pub fn read_inode<'a, I, C>(
     filesystem: &'a dyn FileSystem<I>,
     collection: &'a mut C,
     nid: Nid,
@@ -28,7 +29,8 @@ where
     collection.iget(nid, filesystem)
 }
 
-pub(crate) fn lookup<'a, I, C>(
+/// Lookup
+pub fn lookup<'a, I, C>(
     filesystem: &'a dyn FileSystem<I>,
     collection: &'a mut C,
     name: &str,
@@ -56,7 +58,8 @@ where
     read_inode(filesystem, collection, nid)
 }
 
-pub(crate) fn dir_lookup<'a, I, C>(
+/// dir_lookup
+pub fn dir_lookup<'a, I, C>(
     filesystem: &'a dyn FileSystem<I>,
     collection: &'a mut C,
     inode: &I,
@@ -69,6 +72,32 @@ where
     filesystem
         .find_nid(inode, name)?
         .map_or(Err(ENOENT), |nid| read_inode(filesystem, collection, nid))
+}
+
+/// get_xattr
+pub fn get_xattr<I>(
+    filesystem: &dyn FileSystem<I>,
+    inode: &I,
+    index: u32,
+    name: &[u8],
+    buffer: &mut Option<&mut [u8]>,
+) -> PosixResult<XAttrValue>
+where
+    I: Inode,
+{
+    filesystem.get_xattr(inode, index, name, buffer)
+}
+
+/// list_xattr
+pub fn list_xattrs<I, C>(
+    filesystem: &dyn FileSystem<I>,
+    inode: &I,
+    buffer: &mut [u8],
+) -> PosixResult<usize>
+where
+    I: Inode,
+{
+    filesystem.list_xattrs(inode, buffer)
 }
 
 pub(crate) fn get_xattr_infixes<'a>(

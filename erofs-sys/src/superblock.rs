@@ -17,13 +17,15 @@ use super::*;
 
 use core::mem::size_of;
 
-pub(crate) mod file;
-pub(crate) mod mem;
+/// File based modules
+pub mod file;
+/// Mem based modules
+pub mod mem;
 
 /// The ondisk superblock structure.
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]
-pub(crate) struct SuperBlock {
+pub struct SuperBlock {
     pub(crate) magic: u32,
     pub(crate) checksum: i32,
     pub(crate) feature_compat: i32,
@@ -152,7 +154,7 @@ impl SuperBlock {
     }
 }
 
-pub(crate) trait FileSystem<I>
+pub trait FileSystem<I>
 where
     I: Inode,
 {

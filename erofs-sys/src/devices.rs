@@ -36,7 +36,7 @@ impl From<[u8; 128]> for DeviceSlot {
 }
 
 /// Device information.
-pub(crate) struct DeviceInfo {
+pub struct DeviceInfo {
     pub(crate) mask: u16,
     pub(crate) specs: Vec<DeviceSpec>,
 }

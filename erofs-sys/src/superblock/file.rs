@@ -5,8 +5,8 @@ use super::data::raw_iters::temp_iter::*;
 use super::operations::*;
 use super::*;
 
-pub(crate) struct ImageFileSystem<B>
-// Only support standard file/device io. Not a continguous region of memory.
+/// Only support standard file/device io. Not a continguous region of memory.
+pub struct ImageFileSystem<B>
 where
     B: FileBackend,
 {
@@ -68,7 +68,8 @@ impl<T> ImageFileSystem<T>
 where
     T: FileBackend,
 {
-    pub(crate) fn try_new(backend: T) -> PosixResult<Self> {
+    /// Try create a file based filesystem
+    pub fn try_new(backend: T) -> PosixResult<Self> {
         let mut buf = SUPERBLOCK_EMPTY_BUF;
         backend.fill(&mut buf, 0, EROFS_SUPER_OFFSET)?;
         let sb: SuperBlock = buf.into();
