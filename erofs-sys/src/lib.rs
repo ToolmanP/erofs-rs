@@ -13,11 +13,11 @@
 extern crate alloc;
 
 /// Erofs requires block index to a 32 bit unsigned integer.
-pub(crate) type Blk = u32;
+pub type Blk = u32;
 /// Erofs requires normal offset to be a 64bit unsigned integer.
-pub(crate) type Off = u64;
+pub type Off = u64;
 /// Erofs requires inode nid to be a 64bit unsigned integer.
-pub(crate) type Nid = u64;
+pub type Nid = u64;
 
 pub(crate) const EROFS_SUPER_OFFSET: Off = 1024;
 
@@ -35,7 +35,8 @@ pub mod inode;
 pub(crate) mod map;
 /// Operations Modules
 pub mod operations;
-pub(crate) mod superblock;
+/// Superblock
+pub mod superblock;
 /// Xattrs Module
 pub mod xattrs;
 pub(crate) use errnos::Errno;

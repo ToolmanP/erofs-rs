@@ -5,12 +5,15 @@
 /// Documented on [EROFS Directory](https://erofs.docs.kernel.org/en/latest/core_ondisk.html#directories)
 use core::mem::size_of;
 
+/// DirentDesc
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct DirentDesc {
-    pub(crate) nid: u64,
+pub struct DirentDesc {
+    /// nid
+    pub nid: u64,
     pub(crate) nameoff: u16,
-    pub(crate) file_type: u8,
+    /// file_type
+    pub file_type: u8,
     pub(crate) reserved: u8,
 }
 
@@ -44,7 +47,9 @@ pub struct DirCollection<'a> {
 
 impl<'a> DirCollection<'a> {
     pub(crate) fn new(buffer: &'a [u8]) -> Self {
-        let desc: &DirentDesc = unsafe { &*(buffer.as_ptr() as *const DirentDesc) };
+        let desc_data: [u8; size_of::<DirentDesc>()] =
+            buffer[..size_of::<DirentDesc>()].try_into().unwrap();
+        let desc: DirentDesc = desc_data.into();
         Self {
             data: buffer,
             offset: 0,
@@ -97,5 +102,9 @@ impl<'a> Dirent<'a> {
     /// Dirname
     pub fn dirname(&self) -> &'a [u8] {
         self.name
+    }
+    /// desc
+    pub fn desc(&self) -> &DirentDesc {
+        &self.desc
     }
 }

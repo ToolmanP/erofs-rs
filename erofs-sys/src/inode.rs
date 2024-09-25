@@ -10,7 +10,7 @@ use core::mem::size_of;
 /// Represents the compact bitfield of the Erofs Inode format.
 #[repr(transparent)]
 #[derive(Clone, Copy)]
-pub(crate) struct Format(u16);
+pub struct Format(pub(crate) u16);
 
 pub(crate) const INODE_VERSION_MASK: u16 = 0x1;
 pub(crate) const INODE_VERSION_BIT: u16 = 0;
@@ -40,26 +40,41 @@ pub(crate) enum Version {
 /// As Documented in https://erofs.docs.kernel.org/en/latest/core_ondisk.html#inode-data-layouts
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq)]
-pub(crate) enum Layout {
+pub enum Layout {
+    /// Flat Plain
     FlatPlain,
+    /// CompressedFull
     CompressedFull,
+    /// FlatInline
     FlatInline,
+    /// CompressedCompact
     CompressedCompact,
+    /// Chunk
     Chunk,
+    /// Unknown
     Unknown,
 }
 
+///.Inode Type
 #[repr(C)]
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum Type {
+pub enum Type {
+    /// Regular
     Regular,
+    /// Directory
     Directory,
+    /// Link
     Link,
+    /// Character
     Character,
+    /// Block
     Block,
+    /// Fifo
     Fifo,
+    /// Socket
     Socket,
+    /// Unknown
     Unknown,
 }
 
@@ -74,7 +89,8 @@ impl Format {
         }
     }
 
-    pub(crate) fn layout(&self) -> Layout {
+    /// layout
+    pub fn layout(&self) -> Layout {
         match extract!(self.0, INODE_LAYOUT_BIT, INODE_LAYOUT_MASK) {
             0 => Layout::FlatPlain,
             1 => Layout::CompressedFull,
@@ -93,14 +109,20 @@ impl Format {
 pub struct CompactInodeInfo {
     pub(crate) i_format: Format,
     pub(crate) i_xattr_icount: u16,
-    pub(crate) i_mode: u16,
-    pub(crate) i_nlink: u16,
-    pub(crate) i_size: u32,
+    /// i_mode
+    pub i_mode: u16,
+    /// i_nlink
+    pub i_nlink: u16,
+    /// i_size
+    pub i_size: u32,
     pub(crate) i_reserved: [u8; 4],
     pub(crate) i_u: [u8; 4],
-    pub(crate) i_ino: u32,
-    pub(crate) i_uid: u16,
-    pub(crate) i_gid: u16,
+    /// i_ino
+    pub i_ino: u32,
+    /// i_uid
+    pub i_uid: u16,
+    /// i_gid
+    pub i_gid: u16,
     pub(crate) i_reserved2: [u8; 4],
 }
 
@@ -111,16 +133,24 @@ pub struct CompactInodeInfo {
 pub struct ExtendedInodeInfo {
     pub(crate) i_format: Format,
     pub(crate) i_xattr_icount: u16,
-    pub(crate) i_mode: u16,
+    /// i_mode
+    pub i_mode: u16,
     pub(crate) i_reserved: [u8; 2],
-    pub(crate) i_size: u64,
+    /// i_size
+    pub i_size: u64,
     pub(crate) i_u: [u8; 4],
-    pub(crate) i_ino: u32,
-    pub(crate) i_uid: u32,
-    pub(crate) i_gid: u32,
-    pub(crate) i_mtime: u64,
-    pub(crate) i_mtime_nsec: u32,
-    pub(crate) i_nlink: u32,
+    /// i_ino
+    pub i_ino: u32,
+    /// i_uid
+    pub i_uid: u32,
+    /// i_gid
+    pub i_gid: u32,
+    /// i_mtime
+    pub i_mtime: u64,
+    /// m_time_nsec
+    pub i_mtime_nsec: u32,
+    /// n_link
+    pub i_nlink: u32,
     pub(crate) i_reserved2: [u8; 16],
 }
 
@@ -218,21 +248,24 @@ impl InodeInfo {
         }
     }
 
-    pub(crate) fn format(&self) -> Format {
+    /// format
+    pub fn format(&self) -> Format {
         match self {
             Self::Extended(extended) => extended.i_format,
             Self::Compact(compact) => compact.i_format,
         }
     }
 
-    pub(crate) fn file_size(&self) -> Off {
+    /// file_size
+    pub fn file_size(&self) -> Off {
         match self {
             Self::Extended(extended) => extended.i_size,
             Self::Compact(compact) => compact.i_size as u64,
         }
     }
 
-    pub(crate) fn inode_size(&self) -> Off {
+    /// inode_size
+    pub fn inode_size(&self) -> Off {
         match self {
             Self::Extended(_) => 64,
             Self::Compact(_) => 32,
@@ -257,7 +290,8 @@ impl InodeInfo {
         }
     }
 
-    pub(crate) fn inode_type(&self) -> Type {
+    /// i_node type
+    pub fn inode_type(&self) -> Type {
         let mode = match self {
             Self::Extended(extended) => extended.i_mode,
             Self::Compact(compact) => compact.i_mode,
@@ -272,6 +306,15 @@ impl InodeInfo {
             Self::S_IFCHR => Type::Character, // Character
             _ => Type::Unknown,
         }
+    }
+
+    /// inode_perm
+    pub fn inode_perm(&self) -> u16 {
+        let mode = match self {
+            Self::Extended(extended) => extended.i_mode,
+            Self::Compact(compact) => compact.i_mode,
+        };
+        mode & 0o777
     }
 
     pub(crate) fn xattr_size(&self) -> Off {
@@ -414,6 +457,8 @@ pub trait InodeCollection {
     /// get the inode based on nid and filesystem
     fn iget(&mut self, nid: Nid, filesystem: &dyn FileSystem<Self::I>)
         -> PosixResult<&mut Self::I>;
+    /// release inode
+    fn release(&mut self, nid: Nid);
 }
 
 #[cfg(test)]
@@ -470,6 +515,9 @@ pub(crate) mod tests {
                 }
                 Entry::Occupied(o) => Ok(o.into_mut()),
             }
+        }
+        fn release(&mut self, nid: Nid) {
+            self.remove_entry(&nid);
         }
     }
 }

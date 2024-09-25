@@ -33,13 +33,13 @@ where
 pub fn lookup<'a, I, C>(
     filesystem: &'a dyn FileSystem<I>,
     collection: &'a mut C,
+    mut nid: Nid,
     name: &str,
 ) -> PosixResult<&'a mut I>
 where
     I: Inode,
     C: InodeCollection<I = I>,
 {
-    let mut nid = filesystem.superblock().root_nid as Nid;
     for part in name.split('/') {
         if part.is_empty() {
             continue;

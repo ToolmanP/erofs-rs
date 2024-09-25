@@ -31,10 +31,13 @@ pub struct SuperBlock {
     pub(crate) feature_compat: i32,
     pub(crate) blkszbits: u8,
     pub(crate) sb_extslots: u8,
-    pub(crate) root_nid: i16,
+    /// root_nid
+    pub root_nid: i16,
     pub(crate) inos: i64,
-    pub(crate) build_time: i64,
-    pub(crate) build_time_nsec: i32,
+    /// build_time
+    pub build_time: i64,
+    /// build_time_nsec
+    pub build_time_nsec: i32,
     pub(crate) blocks: i32,
     pub(crate) meta_blkaddr: u32,
     pub(crate) xattr_blkaddr: u32,
@@ -136,12 +139,19 @@ impl SuperBlock {
         (blk as Off) << self.blkszbits
     }
 
-    pub(crate) fn blksz(&self) -> Off {
+    /// blksz
+    pub fn blksz(&self) -> Off {
         1 << self.blkszbits
     }
 
-    pub(crate) fn blk_round_up(&self, addr: Off) -> Blk {
+    /// blk_round_up
+    pub fn blk_round_up(&self, addr: Off) -> Blk {
         ((addr + self.blksz() - 1) >> self.blkszbits) as Blk
+    }
+
+    /// generic round up
+    pub fn blk_round_up_generic(&self, size: Off) -> Blk {
+        ((size + self.blksz() - 1) >> 9) as Blk
     }
 
     pub(crate) fn iloc(&self, nid: Nid) -> Off {
@@ -154,16 +164,22 @@ impl SuperBlock {
     }
 }
 
+/// FileSystem trait
 pub trait FileSystem<I>
 where
     I: Inode,
 {
+    /// Superblock
     fn superblock(&self) -> &SuperBlock;
+    /// Backend
     fn backend(&self) -> &dyn Backend;
+    /// As_filesystem
     fn as_filesystem(&self) -> &dyn FileSystem<I>;
 
     // block map goes here.
+    /// DeviceInfo
     fn device_info(&self) -> &DeviceInfo;
+    /// Flatmap
     fn flatmap(&self, inode: &I, offset: Off, inline: bool) -> MapResult {
         let sb = self.superblock();
         let nblocks = sb.blk_round_up(inode.info().file_size());
@@ -205,7 +221,7 @@ where
             Err(EUCLEAN)
         }
     }
-
+    /// ChunkMap
     fn chunk_map(&self, inode: &I, offset: Off) -> MapResult {
         let sb = self.superblock();
         let chunkformat = match inode.info().spec() {
@@ -278,6 +294,7 @@ where
         }
     }
 
+    /// Map
     fn map(&self, inode: &I, offset: Off) -> MapResult {
         match inode.info().format().layout() {
             Layout::FlatInline => self.flatmap(inode, offset, true),
@@ -293,23 +310,25 @@ where
     // If we want to have trait object that can be exported to c_void
     // Leave it as it is for tradeoffs
 
+    /// Map_Iter
     fn mapped_iter<'b, 'a: 'b>(
         &'a self,
         inode: &'b I,
         offset: Off,
     ) -> PosixResult<Box<dyn BufferMapIter<'a> + 'b>>;
 
+    /// ContinousIter
     fn continuous_iter<'a>(
         &'a self,
         offset: Off,
         len: Off,
     ) -> PosixResult<Box<dyn ContinuousBufferIter<'a> + 'a>>;
 
-    // Inode related goes here.
+    /// ReadInodeInfo
     fn read_inode_info(&self, nid: Nid) -> PosixResult<InodeInfo> {
         (self.as_filesystem(), nid).try_into()
     }
-
+    /// Findnid
     fn find_nid(&self, inode: &I, name: &str) -> PosixResult<Option<Nid>> {
         for buf in self.mapped_iter(inode, 0)? {
             for dirent in buf?.iter_dir() {
@@ -322,11 +341,13 @@ where
     }
 
     // Readdir related goes here.
+    /// FillDentries
     fn fill_dentries(
         &self,
         inode: &I,
         offset: Off,
-        emitter: &mut dyn FnMut(Dirent<'_>, Off),
+        skipents: u64,
+        emitter: &mut dyn FnMut(Dirent<'_>, Off) -> bool,
     ) -> PosixResult<()> {
         let sb = self.superblock();
         let accessor = sb.blk_access(offset);
@@ -340,14 +361,17 @@ where
         let mut map_iter = self.mapped_iter(inode, map_offset)?;
         let first_buf = map_iter.next().unwrap()?;
         let mut collection = first_buf.iter_dir();
-
+        let mut cnt = 0;
         let mut pos: Off = map_offset + blk_offset;
 
         if blk_offset as usize / size_of::<DirentDesc>() <= collection.total() {
             collection.skip_dir(blk_offset as usize / size_of::<DirentDesc>());
             for dirent in collection {
-                emitter(dirent, pos);
+                if cnt >= skipents && emitter(dirent, pos) {
+                    return Ok(());
+                }
                 pos += size_of::<DirentDesc>() as Off;
+                cnt += 1;
             }
         }
 
@@ -355,8 +379,11 @@ where
 
         for buf in map_iter {
             for dirent in buf?.iter_dir() {
-                emitter(dirent, pos);
+                if cnt >= skipents && emitter(dirent, pos) {
+                    return Ok(());
+                }
                 pos += size_of::<DirentDesc>() as Off;
+                cnt += 1;
             }
             pos = round!(UP, pos, sb.blksz());
         }
@@ -364,8 +391,10 @@ where
     }
 
     // Extended attributes goes here.
+    /// XattrInfixes
     fn xattr_infixes(&self) -> &Vec<XAttrInfix>;
     // Currently we eagerly initialized all xattrs;
+    /// xattrs
     fn read_inode_xattrs_shared_entries(
         &self,
         nid: Nid,
@@ -394,6 +423,7 @@ where
             shared_indexes: indexes,
         })
     }
+    /// get_xattr
     fn get_xattr(
         &self,
         inode: &I,
@@ -459,7 +489,7 @@ where
 
         Err(ENODATA)
     }
-
+    /// list_xattrs
     fn list_xattrs(&self, inode: &I, buffer: &mut [u8]) -> PosixResult<usize> {
         let sb = self.superblock();
         let shared_count = inode.xattrs_shared_entries().shared_indexes.len();
@@ -580,7 +610,13 @@ pub(crate) mod tests {
         const LIPSUM_HEX: [u8;64] = hex!("6846740fd4c03c86524d39e0012ec8eb1e4b87e8a90c65227904148bc0e4d0592c209151a736946133cd57f7ec59c4e8a445e7732322dda9ce356f8d0100c4ca");
         const LIPSUM_FILE_SIZE: u64 = 5060;
         const LIPSUM_TYPE: Type = Type::Regular;
-        let inode = lookup(&*sbi.filesystem, &mut sbi.inodes, "/texts/lipsum.txt").unwrap();
+        let inode = lookup(
+            &*sbi.filesystem,
+            &mut sbi.inodes,
+            sbi.filesystem.superblock().root_nid as Nid,
+            "/texts/lipsum.txt",
+        )
+        .unwrap();
         assert_eq!(inode.info().inode_type(), LIPSUM_TYPE);
         assert_eq!(inode.info().file_size(), LIPSUM_FILE_SIZE);
 
@@ -597,7 +633,13 @@ pub(crate) mod tests {
         const IMAGE_FILE_SIZE: u64 = 13735;
         const IMAGE_TYPE: Type = Type::Regular;
 
-        let inode = lookup(&*sbi.filesystem, &mut sbi.inodes, "/images/inabukumori.jpg").unwrap();
+        let inode = lookup(
+            &*sbi.filesystem,
+            &mut sbi.inodes,
+            sbi.filesystem.superblock().root_nid as Nid,
+            "/images/inabukumori.jpg",
+        )
+        .unwrap();
         assert_eq!(inode.info().inode_type(), IMAGE_TYPE);
         assert_eq!(inode.info().file_size(), IMAGE_FILE_SIZE);
         let mut hasher = Sha512::new();
@@ -611,7 +653,13 @@ pub(crate) mod tests {
         const README_CHECKSUM: [u8; 64] = hex!("99fffc75aec028f417d9782fffed6c5d877a29ad1b16fc62bfeb168cdaf8db6db2bad1814904cd0fa18a2396c2c618041682a010601f4052b9895138d4ed6f16");
         const README_FILE_SIZE: u64 = 38;
         const README_TYPE: Type = Type::Regular;
-        let inode = lookup(&*sbi.filesystem, &mut sbi.inodes, "/README.md").unwrap();
+        let inode = lookup(
+            &*sbi.filesystem,
+            &mut sbi.inodes,
+            sbi.filesystem.superblock().root_nid as Nid,
+            "/README.md",
+        )
+        .unwrap();
         assert_eq!(inode.info().inode_type(), README_TYPE);
         assert_eq!(inode.info().file_size(), README_FILE_SIZE);
         let map = sbi.filesystem.map(inode, 0).unwrap();
@@ -632,7 +680,13 @@ pub(crate) mod tests {
         const README_SHA512_LITERAL: &[u8] = b"99fffc75aec028f417d9782fffed6c5d877a29ad1b16fc62bfeb168cdaf8db6db2bad1814904cd0fa18a2396c2c618041682a010601f4052b9895138d4ed6f16";
         const README_SHA512HMAC_LITERAL: &[u8] = b"45d111b7dc1799cc9c4f9989b301cac37c7ba66f5cfb559566c407f7f9476e2596b53d345045d426d9144eaabb9f55abb05f03b1ff44d69081831b19c87cb2d3";
 
-        let inode = lookup(&*sbi.filesystem, &mut sbi.inodes, "/README.md").unwrap();
+        let inode = lookup(
+            &*sbi.filesystem,
+            &mut sbi.inodes,
+            sbi.filesystem.superblock().root_nid as Nid,
+            "/README.md",
+        )
+        .unwrap();
 
         {
             let mut sha512 = [0u8; 128];
@@ -671,7 +725,13 @@ pub(crate) mod tests {
     }
 
     fn test_get_dir_xattr(sbi: &mut SimpleBufferedFileSystem) {
-        let inode = lookup(&*sbi.filesystem, &mut sbi.inodes, "/").unwrap();
+        let inode = lookup(
+            &*sbi.filesystem,
+            &mut sbi.inodes,
+            sbi.filesystem.superblock().root_nid as Nid,
+            "/",
+        )
+        .unwrap();
         assert!(sbi
             .filesystem
             .get_xattr(inode, 2, b"", &mut None)
@@ -680,7 +740,13 @@ pub(crate) mod tests {
 
     fn test_list_xattr(sbi: &mut SimpleBufferedFileSystem) {
         let mut result = [0u8; 512];
-        let inode = lookup(&*sbi.filesystem, &mut sbi.inodes, "/README.md").unwrap();
+        let inode = lookup(
+            &*sbi.filesystem,
+            &mut sbi.inodes,
+            sbi.filesystem.superblock().root_nid as Nid,
+            "/README.md",
+        )
+        .unwrap();
         let length = sbi.filesystem.list_xattrs(inode, &mut result).unwrap();
         assert_eq!(
             &result[..length],
