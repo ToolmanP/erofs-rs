@@ -533,14 +533,18 @@ where
     }
 }
 
-pub(crate) struct SuperblockInfo<I, C, T>
+/// Superblock Info
+pub struct SuperblockInfo<I, C, T>
 where
     I: Inode,
     C: InodeCollection<I = I>,
 {
-    pub(crate) filesystem: Box<dyn FileSystem<I>>,
-    pub(crate) inodes: C,
-    pub(crate) opaque: T,
+    /// filesystem
+    pub filesystem: Box<dyn FileSystem<I>>,
+    /// inodes field
+    pub inodes: C,
+    /// opaque field
+    pub opaque: T,
 }
 
 impl<I, C, T> SuperblockInfo<I, C, T>
@@ -548,7 +552,8 @@ where
     I: Inode,
     C: InodeCollection<I = I>,
 {
-    pub(crate) fn new(fs: Box<dyn FileSystem<I>>, c: C, opaque: T) -> Self {
+    /// Create a new SuperblockInfo
+    pub fn new(fs: Box<dyn FileSystem<I>>, c: C, opaque: T) -> Self {
         Self {
             filesystem: fs,
             inodes: c,
