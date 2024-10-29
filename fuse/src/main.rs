@@ -173,13 +173,6 @@ impl ErofsFuse {
             ino - FUSE_ROOT_ID
         }
     }
-    fn nid_to_ino(&self, nid: Nid) -> u64 {
-        if nid == self.filesystem.superblock().root_nid as u64 {
-            FUSE_ROOT_ID
-        } else {
-            nid + FUSE_ROOT_ID
-        }
-    }
     fn try_read_link(&mut self, ino: u64) -> PosixResult<Vec<u8>> {
         let inode = self
             .collection
