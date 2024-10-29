@@ -168,16 +168,18 @@ impl<'a> XAttrEntriesProvider for SkippableContinuousIter<'a> {
     ) -> PosixResult<usize> {
         let mut cur = if header.name_index.is_long() {
             let if_index: usize = header.name_index.into();
-            let infix: &XAttrInfix = ifs.get(if_index).unwrap();
+            if let Some(infix) = ifs.get(if_index) {
+                let pf_index = infix.prefix_index();
+                let prefix = EROFS_XATTRS_PREFIXS[pf_index as usize];
+                let plen = prefix.len();
 
-            let pf_index = infix.prefix_index();
-            let prefix = EROFS_XATTRS_PREFIXS[pf_index as usize];
-            let plen = prefix.len();
+                buffer[..plen].copy_from_slice(&prefix[..plen]);
+                buffer[plen..infix.name().len() + plen].copy_from_slice(infix.name());
 
-            buffer[..plen].copy_from_slice(&prefix[..plen]);
-            buffer[plen..infix.name().len() + plen].copy_from_slice(infix.name());
-
-            plen + infix.name().len()
+                plen + infix.name().len()
+            } else {
+                return Err(Errno::ENODATA);
+            }
         } else {
             let pf_index: usize = header.name_index.into();
             let prefix = EROFS_XATTRS_PREFIXS[pf_index];

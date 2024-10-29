@@ -129,18 +129,31 @@ mod tests {
 
     #[test]
     fn test_uncompressed_mmap_filesystem() {
-        for file in load_fixtures() {
+        for testcase in load_fixtures_noxattr() {
             let mut sbi: SimpleBufferedFileSystem = SuperblockInfo::new(
                 Box::new(
                     MemFileSystem::try_new(UncompressedBackend::new(unsafe {
-                        MmapMut::map_mut(&file).unwrap()
+                        MmapMut::map_mut(&testcase.file).unwrap()
                     }))
                     .unwrap(),
                 ),
                 HashMap::new(),
                 (),
             );
-            test_filesystem(&mut sbi);
+            test_filesystem(&mut sbi, testcase.xattrs);
+        }
+        for testcase in load_fixtures_full() {
+            let mut sbi: SimpleBufferedFileSystem = SuperblockInfo::new(
+                Box::new(
+                    MemFileSystem::try_new(UncompressedBackend::new(unsafe {
+                        MmapMut::map_mut(&testcase.file).unwrap()
+                    }))
+                    .unwrap(),
+                ),
+                HashMap::new(),
+                (),
+            );
+            test_filesystem(&mut sbi, testcase.xattrs);
         }
     }
 }

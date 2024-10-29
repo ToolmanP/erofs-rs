@@ -118,13 +118,25 @@ mod tests {
 
     #[test]
     fn test_uncompressed_img_filesystem() {
-        for file in load_fixtures() {
+        for testcase in load_fixtures_full() {
             let mut sbi: SimpleBufferedFileSystem = SuperblockInfo::new(
-                Box::new(ImageFileSystem::try_new(UncompressedBackend::new(file)).unwrap()),
+                Box::new(
+                    ImageFileSystem::try_new(UncompressedBackend::new(testcase.file)).unwrap(),
+                ),
                 HashMap::new(),
                 (),
             );
-            test_filesystem(&mut sbi);
+            test_filesystem(&mut sbi, testcase.xattrs);
+        }
+        for testcase in load_fixtures_noxattr() {
+            let mut sbi: SimpleBufferedFileSystem = SuperblockInfo::new(
+                Box::new(
+                    ImageFileSystem::try_new(UncompressedBackend::new(testcase.file)).unwrap(),
+                ),
+                HashMap::new(),
+                (),
+            );
+            test_filesystem(&mut sbi, testcase.xattrs);
         }
     }
 }

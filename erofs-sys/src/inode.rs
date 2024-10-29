@@ -320,9 +320,14 @@ impl InodeInfo {
     pub(crate) fn xattr_size(&self) -> Off {
         match self {
             Self::Extended(extended) => {
-                size_of::<XAttrSharedEntrySummary>() as Off
-                    + (size_of::<c_int>() as Off) * (extended.i_xattr_icount as Off - 1)
+                if extended.i_xattr_icount == 0 {
+                    0
+                } else {
+                    size_of::<XAttrSharedEntrySummary>() as Off
+                        + (size_of::<c_int>() as Off) * (extended.i_xattr_icount as Off - 1)
+                }
             }
+
             Self::Compact(_) => 0,
         }
     }

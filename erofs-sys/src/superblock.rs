@@ -400,6 +400,13 @@ where
         nid: Nid,
         info: &InodeInfo,
     ) -> PosixResult<XAttrSharedEntries> {
+        if info.xattr_size() == 0 {
+            return Ok(XAttrSharedEntries {
+                name_filter: 0,
+                shared_indexes: Vec::new(),
+            });
+        }
+
         let sb = self.superblock();
         let mut offset = sb.iloc(nid) + info.inode_size();
         let mut buf = XATTR_ENTRY_SUMMARY_BUF;
@@ -438,26 +445,28 @@ where
             + size_of::<XAttrSharedEntrySummary>() as Off
             + 4 * shared_count as Off;
 
-        let inline_len = inode.info().xattr_size()
-            - size_of::<XAttrSharedEntrySummary>() as Off
-            - shared_count as Off * 4;
+        let inline_header_sz =
+            size_of::<XAttrSharedEntrySummary>() as Off + shared_count as Off * 4;
 
-        if let Some(mut inline_provider) =
-            SkippableContinuousIter::try_new(self.continuous_iter(inline_offset, inline_len)?)?
-        {
-            while !inline_provider.eof() {
-                let header = inline_provider.get_entry_header()?;
-                match inline_provider.query_xattr_value(
-                    self.xattr_infixes(),
-                    &header,
-                    name,
-                    index,
-                    buffer,
-                ) {
-                    Ok(value) => return Ok(value),
-                    Err(e) => {
-                        if e != ENODATA {
-                            return Err(e);
+        if inline_header_sz <= inode.info().xattr_size() {
+            let inline_len = inode.info().xattr_size() - inline_header_sz;
+            if let Some(mut inline_provider) =
+                SkippableContinuousIter::try_new(self.continuous_iter(inline_offset, inline_len)?)?
+            {
+                while !inline_provider.eof() {
+                    let header = inline_provider.get_entry_header()?;
+                    match inline_provider.query_xattr_value(
+                        self.xattr_infixes(),
+                        &header,
+                        name,
+                        index,
+                        buffer,
+                    ) {
+                        Ok(value) => return Ok(value),
+                        Err(e) => {
+                            if e != ENODATA {
+                                return Err(e);
+                            }
                         }
                     }
                 }
@@ -497,22 +506,24 @@ where
             + inode.info().inode_size() as Off
             + size_of::<XAttrSharedEntrySummary>() as Off
             + shared_count as Off * 4;
+        let inline_header_sz =
+            size_of::<XAttrSharedEntrySummary>() as Off + shared_count as Off * 4;
         let mut offset = 0;
-        let inline_len = inode.info().xattr_size()
-            - size_of::<XAttrSharedEntrySummary>() as Off
-            - shared_count as Off * 4;
 
-        if let Some(mut inline_provider) =
-            SkippableContinuousIter::try_new(self.continuous_iter(inline_offset, inline_len)?)?
-        {
-            while !inline_provider.eof() {
-                let header = inline_provider.get_entry_header()?;
-                offset += inline_provider.get_xattr_key(
-                    self.xattr_infixes(),
-                    &header,
-                    &mut buffer[offset..],
-                )?;
-                inline_provider.skip_xattr_value(&header)?;
+        if inline_header_sz <= inode.info().xattr_size() {
+            let inline_len = inode.info().xattr_size() - inline_header_sz;
+            if let Some(mut inline_provider) =
+                SkippableContinuousIter::try_new(self.continuous_iter(inline_offset, inline_len)?)?
+            {
+                while !inline_provider.eof() {
+                    let header = inline_provider.get_entry_header()?;
+                    offset += inline_provider.get_xattr_key(
+                        self.xattr_infixes(),
+                        &header,
+                        &mut buffer[offset..],
+                    )?;
+                    inline_provider.skip_xattr_value(&header)?;
+                }
             }
         }
 
@@ -584,27 +595,52 @@ pub(crate) mod tests {
     pub(crate) type SimpleBufferedFileSystem =
         SuperblockInfo<SimpleInode, HashMap<Nid, SimpleInode>, ()>;
 
-    pub(crate) fn load_fixtures() -> impl Iterator<Item = File> {
+    pub(crate) struct TestFile {
+        pub(crate) file: File,
+        pub(crate) xattrs: bool,
+    }
+
+    pub(crate) fn load_fixtures_full() -> impl Iterator<Item = TestFile> {
         let flat = vec![512, 1024, 2048, 4096].into_iter().map(|num| {
             let mut s = env!("CARGO_MANIFEST_DIR").to_string();
             s.push_str(&format!("/tests/sample_{num}.img"));
-            File::options()
-                .read(true)
-                .write(true)
-                .open(Path::new(&s))
-                .unwrap()
+            TestFile {
+                file: File::options()
+                    .read(true)
+                    .write(true)
+                    .open(Path::new(&s))
+                    .unwrap(),
+                xattrs: true,
+            }
         });
 
         let chunk = vec![1024].into_iter().map(|num| {
             let mut s = env!("CARGO_MANIFEST_DIR").to_string();
             s.push_str(&format!("/tests/sample_512_{num}.img"));
-            File::options()
+            TestFile {
+                file: File::options()
+                    .read(true)
+                    .write(true)
+                    .open(Path::new(&s))
+                    .unwrap(),
+                xattrs: true,
+            }
+        });
+        flat.chain(chunk)
+    }
+
+    pub(crate) fn load_fixtures_noxattr() -> impl Iterator<Item = TestFile> {
+        let mut s = env!("CARGO_MANIFEST_DIR").to_string();
+        s.push_str(&"/tests/sample_noxattrs.img".to_string());
+        return [TestFile {
+            file: File::options()
                 .read(true)
                 .write(true)
                 .open(Path::new(&s))
-                .unwrap()
-        });
-        flat.chain(chunk)
+                .unwrap(),
+            xattrs: false,
+        }]
+        .into_iter();
     }
 
     fn test_superblock_def(sbi: &mut SimpleBufferedFileSystem) {
@@ -759,14 +795,46 @@ pub(crate) mod tests {
         );
     }
 
-    pub(crate) fn test_filesystem(sbi: &mut SimpleBufferedFileSystem) {
+    fn test_list_xattr_empty(sbi: &mut SimpleBufferedFileSystem) {
+        let mut result = [0u8; 512];
+        let inode = lookup(
+            &*sbi.filesystem,
+            &mut sbi.inodes,
+            sbi.filesystem.superblock().root_nid as Nid,
+            "/README.md",
+        )
+        .unwrap();
+        let length = sbi.filesystem.list_xattrs(inode, &mut result).unwrap();
+        assert_eq!(length, 0);
+    }
+
+    fn test_get_xattr_empty(sbi: &mut SimpleBufferedFileSystem) {
+        let inode = lookup(
+            &*sbi.filesystem,
+            &mut sbi.inodes,
+            sbi.filesystem.superblock().root_nid as Nid,
+            "/noxattr.txt",
+        )
+        .unwrap();
+        assert!(sbi
+            .filesystem
+            .get_xattr(inode, 2, b"", &mut None)
+            .is_err_and(|x| x == Errno::ENODATA));
+    }
+
+    pub(crate) fn test_filesystem(sbi: &mut SimpleBufferedFileSystem, xattrs_enabled: bool) {
         test_superblock_def(sbi);
         test_filesystem_ilookup1(sbi);
         test_filesystem_ilookup2(sbi);
         test_continous_iter(sbi);
-        test_get_file_xattr(sbi);
-        test_get_dir_xattr(sbi);
-        test_list_xattr(sbi);
+        if xattrs_enabled {
+            test_get_file_xattr(sbi);
+            test_get_dir_xattr(sbi);
+            test_list_xattr(sbi);
+        } else {
+            test_list_xattr_empty(sbi);
+            test_get_xattr_empty(sbi);
+        }
     }
 
     #[test]
